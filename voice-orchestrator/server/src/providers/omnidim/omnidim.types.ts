@@ -90,9 +90,15 @@ export interface OmnidimErrorResponse {
 // ── Full agent config types (for import/detail view) ─────────────────────────
 
 export interface OmnidimContextBreakdown {
-  title: string;
-  body: string;
+  id?: number;
+  /** Single-fetch field names */
+  context_title?: string;
+  context_body?: string;
+  /** Legacy field names (kept for compatibility) */
+  title?: string;
+  body?: string;
   is_enabled?: boolean;
+  is_auto_generated?: boolean;
 }
 
 export interface OmnidimTranscriberConfig {

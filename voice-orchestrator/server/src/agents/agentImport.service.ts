@@ -29,12 +29,17 @@ export interface ImportResult {
 
 /**
  * Builds a systemPrompt by concatenating context_breakdown entries.
+ * Handles both context_title/context_body (single-fetch) and title/body (legacy).
  */
 function buildSystemPrompt(agent: OmnidimFullAgent): string {
   if (!agent.context_breakdown?.length) return '';
   return agent.context_breakdown
     .filter((cb) => cb.is_enabled !== false)
-    .map((cb) => `## ${cb.title}\n${cb.body}`)
+    .map((cb) => {
+      const title = cb.context_title ?? cb.title ?? '';
+      const body = cb.context_body ?? cb.body ?? '';
+      return `## ${title}\n${body}`;
+    })
     .join('\n\n');
 }
 
