@@ -140,8 +140,8 @@ export class CallService {
       ...(opts.call_status ? { call_status: opts.call_status } : {}),
     });
 
-    // Omnidim may return call_logs or logs key
-    const logs = resp.call_logs ?? resp.logs ?? [];
+    // Omnidim returns call_log_data key; fall back to legacy keys
+    const logs = resp.call_log_data ?? resp.call_logs ?? resp.logs ?? [];
     const total = resp.total_records ?? resp.total ?? logs.length;
 
     return { logs, total };

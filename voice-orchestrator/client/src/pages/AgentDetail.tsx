@@ -574,48 +574,55 @@ function ProviderConfigTab({ agentId }: { agentId: string }) {
 
 // ── Calls tab ─────────────────────────────────────────────────────────────────
 
-interface OmnidimCallLog {
-  call_log_id?: string | number;
-  id?: string | number;
-  agent_id?: number;
-  agent_name?: string;
+interface AgentCallLog {
+  id?: number | string;
   to_number?: string;
+  from_number?: string;
   call_status?: string;
-  status?: string;
-  duration?: number;
-  summary?: string;
+  call_duration_in_seconds?: number;
+  time_of_call?: string;
   recording_url?: string;
-  created_at?: string;
-  ended_at?: string;
+  sentiment_score?: string;
   call_cost?: number;
+  call_direction?: string;
   [key: string]: unknown;
 }
 
-const CALL_STATUS_COLORS: Record<string, string> = {
-  completed: 'bg-green-100 text-green-800',
-  failed: 'bg-red-100 text-red-800',
-  in_progress: 'bg-blue-100 text-blue-800',
-  ringing: 'bg-yellow-100 text-yellow-800',
-  cancelled: 'bg-gray-100 text-gray-800',
+const AGENT_CALL_STATUS: Record<string, { bg: string; text: string; dot: string }> = {
+  completed:  { bg: 'bg-green-50 dark:bg-green-950/30',  text: 'text-green-700 dark:text-green-400',  dot: 'bg-green-500' },
+  failed:     { bg: 'bg-red-50 dark:bg-red-950/30',    text: 'text-red-700 dark:text-red-400',    dot: 'bg-red-500' },
+  busy:       { bg: 'bg-yellow-50 dark:bg-yellow-950/30', text: 'text-yellow-700 dark:text-yellow-400', dot: 'bg-yellow-500' },
+  'no-answer':{ bg: 'bg-orange-50 dark:bg-orange-950/30', text: 'text-orange-700 dark:text-orange-400', dot: 'bg-orange-500' },
 };
+
+function parseAgentDate(raw?: string | null): string {
+  if (!raw) return '—';
+  try {
+    const [datePart, timePart] = raw.split(' ');
+    const [month, day, year] = datePart.split('/');
+    return new Date(`${year}-${month}-${day}T${timePart}`).toLocaleString(undefined, {
+      month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+  } catch { return raw; }
+}
 
 function CallsTab({ agentId }: { agentId: string }) {
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const PAGE_SIZE = 10;
 
   const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ['agent-call-logs', agentId, page],
     queryFn: async () => {
       const res = await api.get('/calls/logs/remote', {
-        params: { agentId, page, pageSize },
+        params: { agentId, page, pageSize: PAGE_SIZE },
       });
-      return res.data.data as { logs: OmnidimCallLog[]; total: number };
+      return res.data.data as { logs: AgentCallLog[]; total: number };
     },
   });
 
   const logs = data?.logs ?? [];
   const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   if (isLoading) {
     return (
@@ -627,86 +634,83 @@ function CallsTab({ agentId }: { agentId: string }) {
 
   if (!logs.length) {
     return (
-      <div className="flex h-40 items-center justify-center rounded-md border border-dashed">
+      <div className="flex h-48 items-center justify-center rounded-xl border border-dashed">
         <div className="text-center">
-          <Phone className="mx-auto h-8 w-8 text-muted-foreground" />
-          <p className="mt-2 text-sm font-medium">No calls yet</p>
-          <p className="mt-1 text-xs text-muted-foreground">Start a call to see activity here.</p>
+          <Phone className="mx-auto h-10 w-10 text-muted-foreground/40 mb-3" />
+          <p className="text-sm font-medium">No calls yet</p>
+          <p className="mt-1 text-xs text-muted-foreground">Dispatch a call to see activity here.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">{total} total call{total !== 1 ? 's' : ''}</p>
-        <Button variant="ghost" size="sm" onClick={() => refetch()} disabled={isFetching}>
-          <RefreshCw className={`mr-1 h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
+        <p className="text-sm text-muted-foreground">{total} call{total !== 1 ? 's' : ''} total</p>
+        <Button variant="ghost" size="sm" onClick={() => refetch()} disabled={isFetching} className="gap-1.5">
+          <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
           Refresh
         </Button>
       </div>
 
-      <div className="rounded-md border">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b bg-muted/50">
-              <th className="px-4 py-2 text-left font-medium">Phone</th>
-              <th className="px-4 py-2 text-left font-medium">Status</th>
-              <th className="px-4 py-2 text-left font-medium">Duration</th>
-              <th className="px-4 py-2 text-left font-medium">Date</th>
-              <th className="px-4 py-2 text-left font-medium">Recording</th>
-            </tr>
-          </thead>
-          <tbody>
-            {logs.map((log, i) => {
-              const logId = log.call_log_id ?? log.id ?? i;
-              const status = (log.call_status ?? log.status ?? '').toLowerCase();
-              const statusColor = CALL_STATUS_COLORS[status] ?? 'bg-gray-100 text-gray-800';
-              const secs = log.duration ?? 0;
-              const dur = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
-              const date = log.created_at ? new Date(log.created_at).toLocaleString() : '—';
-              return (
-                <tr key={String(logId)} className="border-b last:border-0 hover:bg-muted/30">
-                  <td className="px-4 py-2 font-mono">{log.to_number ?? '—'}</td>
-                  <td className="px-4 py-2">
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusColor}`}>
-                      {status || '—'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2">{secs ? dur : '—'}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{date}</td>
-                  <td className="px-4 py-2">
-                    {log.recording_url ? (
-                      <a
-                        href={String(log.recording_url)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-blue-600 hover:underline"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                        Play
-                      </a>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="rounded-xl border overflow-hidden">
+        <div className="divide-y">
+          {logs.map((log, i) => {
+            const key = (log.call_status ?? '').toLowerCase().replace(/ /g, '_');
+            const statusCfg = AGENT_CALL_STATUS[key] ?? { bg: 'bg-muted', text: 'text-muted-foreground', dot: 'bg-gray-400' };
+            const secs = log.call_duration_in_seconds ?? 0;
+            const dur = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : secs ? `${secs}s` : '—';
+            const isOutbound = (log.call_direction ?? '').toLowerCase() === 'outbound';
+
+            return (
+              <div key={String(log.id ?? i)} className="flex items-center gap-4 px-4 py-3 hover:bg-muted/40 transition-colors">
+                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+                  isOutbound ? 'bg-blue-50 dark:bg-blue-950/50' : 'bg-green-50 dark:bg-green-950/50'
+                }`}>
+                  {isOutbound
+                    ? <PhoneOff className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                    : <Phone className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
+                  }
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-mono font-medium">{log.to_number ?? log.from_number ?? '—'}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{parseAgentDate(log.time_of_call)}</p>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {secs > 0 && <span className="text-xs text-muted-foreground">{dur}</span>}
+                  {log.call_cost != null && (
+                    <span className="text-xs text-muted-foreground">${log.call_cost.toFixed(3)}</span>
+                  )}
+                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${statusCfg.bg} ${statusCfg.text}`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${statusCfg.dot}`} />
+                    {log.call_status ?? '—'}
+                  </span>
+                  {log.recording_url && (
+                    <a
+                      href={String(log.recording_url)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-xs text-primary hover:underline"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      Play
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {totalPages > 1 && (
         <div className="flex items-center justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
-            Previous
-          </Button>
+          <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>Previous</Button>
           <span className="text-sm text-muted-foreground">Page {page} of {totalPages}</span>
-          <Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
-            Next
-          </Button>
+          <Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>Next</Button>
         </div>
       )}
     </div>

@@ -104,33 +104,65 @@ export interface OmnidimDispatchCallResponse {
   [key: string]: unknown;
 }
 
+export interface OmnidimCallInteraction {
+  id?: number;
+  interaction_sequence?: number;
+  user_query?: string;
+  bot_response?: string;
+  time_of_call?: string;
+  llm2_time?: number;
+  asr_time?: number;
+  tts_time?: number;
+  total_tokens?: number;
+  tts_speaking_duration?: number;
+  [key: string]: unknown;
+}
+
 export interface OmnidimCallLogEntry {
-  call_log_id?: string | number;
-  id?: string | number;
-  agent_id?: number;
-  agent_name?: string;
-  to_number?: string;
+  id?: number | string;
+  bot_name?: string;
+  /** time_of_call format: "MM/DD/YYYY HH:MM:SS" */
+  time_of_call?: string;
   from_number?: string;
+  to_number?: string;
+  call_direction?: string;
+  /** "M.00:S.00" format */
+  call_duration?: string;
+  call_duration_in_seconds?: number;
+  call_duration_in_minutes?: number;
   call_status?: string;
-  status?: string;
-  duration?: number;
-  transcript?: string;
-  summary?: string;
   recording_url?: string;
-  created_at?: string;
-  started_at?: string;
-  ended_at?: string;
+  internal_recording_url?: string;
+  call_conversation?: string;
+  sentiment_score?: string;
+  sentiment_analysis_details?: string;
+  call_type?: boolean | string;
+  is_call_transfer?: boolean;
   call_cost?: number;
+  aggregated_estimated_cost?: number;
+  model_name?: string;
+  model_type?: string;
+  asr_service?: string;
+  tts_service?: string;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  hangup_source?: string | null;
+  hangup_reason?: string | null;
+  extracted_variables?: Record<string, unknown>;
+  interactions?: OmnidimCallInteraction[];
+  channel_type?: string;
   [key: string]: unknown;
 }
 
 export interface OmnidimCallLogsResponse {
+  /** Actual key returned by Omnidim API */
+  call_log_data?: OmnidimCallLogEntry[];
+  /** Legacy fallback keys */
   call_logs?: OmnidimCallLogEntry[];
   logs?: OmnidimCallLogEntry[];
   total_records?: number;
   total?: number;
-  page?: number;
-  page_size?: number;
   [key: string]: unknown;
 }
 
