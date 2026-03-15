@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Mic2,
+  Code2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -18,6 +19,7 @@ const navItems = [
   { to: '/calls', label: 'Calls', icon: Phone },
   { to: '/tools', label: 'Tools', icon: Wrench },
   { to: '/settings', label: 'Settings', icon: Settings },
+  { to: '/dev', label: 'Developer', icon: Code2 },
 ];
 
 export function Sidebar() {

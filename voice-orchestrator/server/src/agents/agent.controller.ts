@@ -13,7 +13,8 @@ import { logger } from '../utils/logger';
 type IdParam = { id: string };
 
 const ImportSingleSchema = z.object({
-  agentId: z.string().min(1, 'agentId is required'),
+  // Omnidim returns integer IDs; accept both string and number and coerce to string
+  agentId: z.union([z.string().min(1), z.number()]).transform(String),
 });
 
 // ── Existing CRUD handlers ────────────────────────────────────────────────────

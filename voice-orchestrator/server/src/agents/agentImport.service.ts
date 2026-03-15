@@ -40,8 +40,23 @@ function buildSystemPrompt(agent: OmnidimFullAgent): string {
 
 /**
  * Derives the primary language code from an Omnidim agent.
+ * Handles both list response (language: string[]) and legacy shapes.
  */
 function deriveLanguage(agent: OmnidimFullAgent): string {
+  // List response: language is an array of names like ["English","Hindi"]
+  const lang = agent.language;
+  if (Array.isArray(lang) && lang.length > 0) {
+    const nameToCode: Record<string, string> = {
+      English: 'en', Hindi: 'hi', Marathi: 'mr', Tamil: 'ta',
+      Telugu: 'te', Kannada: 'kn', Bengali: 'bn', Gujarati: 'gu',
+      Punjabi: 'pa', Malayalam: 'ml',
+    };
+    return nameToCode[lang[0]] ?? lang[0].toLowerCase().slice(0, 2);
+  }
+  if (typeof lang === 'string' && lang.trim()) return lang.trim();
+  // Use accent code if available (e.g. "en-IN")
+  if (agent.english_voice_accent) return agent.english_voice_accent;
+  // Legacy shapes
   if (agent.languages?.length) return agent.languages[0] ?? 'en';
   if (agent.transcriber?.language) return agent.transcriber.language;
   return 'en';
@@ -57,26 +72,29 @@ function mapOmnidimToAgent(
 ) {
   const systemPrompt = buildSystemPrompt(omnidimAgent);
   const voiceLanguage = deriveLanguage(omnidimAgent);
-  const voiceModel = omnidimAgent.voice?.voice_id ?? 'default';
+
+  // voice can be a string ID (list) or a config object (single-fetch)
+  const voiceModel = typeof omnidimAgent.voice === 'string'
+    ? omnidimAgent.voice
+    : (omnidimAgent.voice as { voice_id?: string } | undefined)?.voice_id ?? 'default';
 
   return {
     tenantId,
     ownerUserId,
     name: omnidimAgent.name,
     provider: 'OMNIDIM' as const,
-    providerAgentId: omnidimAgent.id,
+    providerAgentId: String(omnidimAgent.id),
     voiceLanguage,
     voiceModel,
     systemPrompt: systemPrompt || omnidimAgent.name,
     isActive: omnidimAgent.is_active ?? true,
     providerConfig: omnidimAgent as unknown as Prisma.InputJsonValue,
     welcomeMessage: omnidimAgent.welcome_message ?? null,
-    callType: omnidimAgent.call_type ?? 'Incoming',
+    callType: omnidimAgent.bot_call_type ?? omnidimAgent.call_type ?? 'Incoming',
     tools: [] as Prisma.InputJsonValue,
     metadata: ({
       importedAt: new Date().toISOString(),
       importedFrom: 'omnidim',
-      originalConfig: omnidimAgent,
     } as unknown) as Prisma.InputJsonValue,
   };
 }
@@ -105,7 +123,7 @@ export class AgentImportService {
 
     // Upsert: unique on (tenantId, providerAgentId)
     const existing = await this.prisma.agent.findFirst({
-      where: { tenantId, providerAgentId: omnidimAgentId },
+      where: { tenantId, providerAgentId: String(omnidimAgentId) },
     });
 
     if (existing) {
@@ -170,7 +188,7 @@ export class AgentImportService {
         const { action } = await this.importFromOmnidim(
           tenantId,
           ownerUserId,
-          remoteAgent.id,
+          String(remoteAgent.id),
         );
         if (action === 'created') result.imported++;
         else result.updated++;
@@ -204,10 +222,10 @@ export class AgentImportService {
         logger.info({ firstBotKeys: Object.keys(bots[0] as object), firstBot: bots[0] }, 'listRemoteAgents: sample bot structure from Omnidim');
       }
       remoteAgents = bots.map((a) => ({
-        id: a.id,
+        id: String(a.id),
         name: a.name,
-        call_type: a.call_type,
-        is_active: a.is_active,
+        call_type: a.bot_call_type ?? a.call_type,
+        is_active: a.is_active ?? true,
         updated_at: a.updated_at,
       }));
     } else {

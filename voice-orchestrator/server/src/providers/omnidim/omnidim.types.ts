@@ -171,27 +171,87 @@ export interface OmnidimEndCallConfig {
   message?: string;
 }
 
-/** Full agent response from GET /agents/{agent_id} — richer than the list response */
+/**
+ * Full agent / bot object from Omnidim.
+ * The list endpoint (GET /agents) returns a flat structure with integer id and
+ * direct fields like `bot_call_type`, `voice` (string ID), `language` (array).
+ * The single-fetch endpoint may return a richer shape — both are covered here.
+ */
 export interface OmnidimFullAgent {
-  id: string;
+  /** Integer in list response, string in some single-fetch responses */
+  id: number | string;
   name: string;
+  bot_type?: string;
+
+  // ── Voice ───────────────────────────────────────────────────────────────
+  /** Voice ID string in list response */
+  voice?: string | OmnidimVoiceConfig;
+  voice_provider?: string;
+  voice_external_id?: string;
+  english_voice_accent?: string;
+  voice_name?: string;
+  speech_speed?: number;
+
+  // ── Language ────────────────────────────────────────────────────────────
+  /** Array of language names in list response (e.g. ["English","Hindi"]) */
+  language?: string | string[];
+  /** Legacy: language codes array */
+  languages?: string[];
+
+  // ── LLM / model ─────────────────────────────────────────────────────────
+  llm_service?: string;
+  model?: OmnidimModelConfig;
+
+  // ── Call type ────────────────────────────────────────────────────────────
+  /** "Outgoing" | "Incoming" — used in list response */
+  bot_call_type?: string;
+  /** Legacy single-fetch alias */
+  call_type?: string;
+
+  // ── Filler / noise ──────────────────────────────────────────────────────
+  is_filler_enable?: boolean;
+  filler_after_sec?: number;
+  fillers?: unknown;
+  background_noise_enabled?: boolean;
+  background_noice_name?: unknown;
+  background_audio_volume?: number;
+
+  // ── End call ────────────────────────────────────────────────────────────
+  is_end_call_enabled?: boolean;
+  end_call_condition?: string | false;
+  end_call_message?: string | false;
+  end_call_message_type?: string;
+  end_call_message_prompt?: string | false;
+
+  // ── Voicemail ───────────────────────────────────────────────────────────
+  voicemail_enabled?: boolean;
+
+  // ── Web search ──────────────────────────────────────────────────────────
+  enable_web_search?: boolean;
+  web_search_engine?: string | false;
+  web_search?: OmnidimWebSearchConfig;
+
+  // ── Rich/legacy fields (single-fetch shape) ─────────────────────────────
   welcome_message?: string;
   context_breakdown?: OmnidimContextBreakdown[];
   transcriber?: OmnidimTranscriberConfig;
-  model?: OmnidimModelConfig;
-  voice?: OmnidimVoiceConfig;
-  web_search?: OmnidimWebSearchConfig;
   post_call_actions?: OmnidimPostCallActions;
   filler?: OmnidimFillerConfig;
   background_track?: OmnidimBackgroundTrackConfig;
   voicemail?: OmnidimVoicemailConfig;
-  languages?: string[];
   transfer?: OmnidimTransferConfig;
   end_call?: OmnidimEndCallConfig;
-  call_type?: string;
+
+  // ── Status / metadata ───────────────────────────────────────────────────
   is_active?: boolean;
+  allow_to_delete?: boolean;
   created_at?: string;
   updated_at?: string;
+  user_id?: number;
+  user_name?: string;
+
+  // ── Catch-all for extra fields ──────────────────────────────────────────
+  [key: string]: unknown;
 }
 
 /** Paginated list response from GET /agents — Omnidim uses "bots" not "agents" */

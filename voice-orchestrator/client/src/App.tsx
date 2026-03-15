@@ -11,6 +11,7 @@ import AgentDetail from './pages/AgentDetail';
 import Calls from './pages/Calls';
 import Tools from './pages/Tools';
 import Settings from './pages/Settings';
+import DevTools from './pages/DevTools';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -43,6 +44,7 @@ export default function App() {
               <Route path="/calls" element={<Calls />} />
               <Route path="/tools" element={<Tools />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/dev" element={<DevTools />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
