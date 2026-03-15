@@ -9,13 +9,6 @@ datasource db {
 
 // ── Enums ────────────────────────────────────────────────────────────────────
 
-enum TenantPlan {
-  FREE
-  STARTER
-  PRO
-  ENTERPRISE
-}
-
 enum VoiceProvider {
   OMNIDIM
   BOLNA
@@ -73,30 +66,8 @@ enum CallEventType {
 
 // ── Models ───────────────────────────────────────────────────────────────────
 
-/// Synced from SuperAdmin — NOT the source of truth for users.
-model Tenant {
-  id          String     @id @default(uuid())
-  slug        String     @unique
-  name        String
-  /// AES-256-GCM encrypted Neon DB URL for dedicated DB routing.
-  databaseUrl String?
-  plan        TenantPlan @default(FREE)
-  settings    Json       @default("{}")
-  isActive    Boolean    @default(true)
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-
-  providerCredentials ProviderCredential[]
-  auditLogs           AuditLog[]
-  agents              Agent[]
-  calls               Call[]
-  tools               Tool[]
-
-  @@index([slug])
-  @@map("tenants")
-}
-
 /// Tenant-specific API keys for voice AI providers (apiKey encrypted at rest).
+/// tenantId is a plain string (UUID from JWT) — no FK to a local tenants table.
 model ProviderCredential {
   id        String        @id @default(uuid())
   tenantId  String
@@ -109,8 +80,6 @@ model ProviderCredential {
   isDefault Boolean       @default(false)
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
-
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, provider])
   @@index([tenantId])
@@ -133,6 +102,7 @@ model ProviderConfig {
 }
 
 /// Voice AI agent configuration, synced to the provider on create/update.
+/// tenantId is a plain string (UUID from JWT) — used to filter, not FK.
 model Agent {
   id                 String        @id @default(uuid())
   tenantId           String
@@ -154,14 +124,14 @@ model Agent {
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  calls  Call[]
+  calls Call[]
 
   @@index([tenantId])
   @@map("agents")
 }
 
 /// A single voice call — OUTBOUND by default, INBOUND for received calls.
+/// tenantId is a plain string (UUID from JWT) — used to filter, not FK.
 model Call {
   id             String        @id @default(uuid())
   tenantId       String
@@ -184,7 +154,6 @@ model Call {
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
-  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   agent         Agent          @relation(fields: [agentId], references: [id])
   events        CallEvent[]
   webhookEvents WebhookEvent[]
@@ -195,26 +164,25 @@ model Call {
 }
 
 /// HTTP tool that can be invoked by an agent during a call.
+/// tenantId is a plain string (UUID from JWT) — used to filter, not FK.
 model Tool {
-  id          String       @id @default(uuid())
-  tenantId    String
-  ownerUserId String
-  name        String
-  description String
-  endpoint    String
-  method      HttpMethod   @default(POST)
-  headers     Json         @default("{}")
+  id           String       @id @default(uuid())
+  tenantId     String
+  ownerUserId  String
+  name         String
+  description  String
+  endpoint     String
+  method       HttpMethod   @default(POST)
+  headers      Json         @default("{}")
   bodyTemplate Json?
-  authType    ToolAuthType @default(NONE)
+  authType     ToolAuthType @default(NONE)
   /// Encrypted JSON containing auth credentials (API key, token, etc.).
-  authConfig  Json         @default("{}")
-  timeout     Int          @default(30)
-  retries     Int          @default(0)
-  isActive    Boolean      @default(true)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  authConfig   Json         @default("{}")
+  timeout      Int          @default(30)
+  retries      Int          @default(0)
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 
   @@index([tenantId])
   @@map("tools")
@@ -268,8 +236,6 @@ model AuditLog {
   metadata   Json?
   ipAddress  String?
   createdAt  DateTime @default(now())
-
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
   @@index([tenantId, userId])

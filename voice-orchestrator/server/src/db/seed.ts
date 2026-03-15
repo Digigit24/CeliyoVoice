@@ -2,12 +2,14 @@
  * Database seed script.
  *
  * Creates:
- *   - 1 test tenant (no users — users are managed by SuperAdmin)
  *   - 2 provider credentials (Omnidim + Bolna)
  *   - 2 global provider configs (Omnidim + Bolna)
  *   - 3 sample agents
  *   - 10 sample calls with mixed statuses
  *   - 2 sample tools
+ *
+ * Note: Tenants are managed by the SuperAdmin service — no local Tenant table.
+ * The TEST_TENANT_ID below should be a real tenant ID from SuperAdmin.
  *
  * Run: npm run db:seed
  */
@@ -29,20 +31,7 @@ const SEED_USER_ID = '00000000-0000-0000-0000-000000000001';
 async function seed(): Promise<void> {
   console.log('🌱 Starting seed...');
 
-  // ── Tenant ────────────────────────────────────────────────────────────────
-  const tenant = await prisma.tenant.upsert({
-    where: { id: TEST_TENANT_ID },
-    create: {
-      id: TEST_TENANT_ID,
-      slug: TEST_TENANT_SLUG,
-      name: 'Acme Demo Tenant',
-      plan: 'STARTER',
-      settings: { timezone: 'Asia/Kolkata', language: 'en', maxConcurrentCalls: 5 },
-      isActive: true,
-    },
-    update: { name: 'Acme Demo Tenant', plan: 'STARTER' },
-  });
-  console.log(`✅ Tenant: ${tenant.name} (${tenant.id})`);
+  console.log(`Using test tenant ID: ${TEST_TENANT_ID} (from SuperAdmin)`);
 
   // ── Global Provider Configs ───────────────────────────────────────────────
   const omnidimConfig = await prisma.providerConfig.upsert({

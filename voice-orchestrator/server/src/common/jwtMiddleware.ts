@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { config } from '../core/config';
 import { MODULE_NAME, PUBLIC_PATHS, TENANT_HEADERS } from './constants';
 import { TenantUser, type JwtPayload } from './TenantUser';
-import { getPrismaClient } from '../db/tenantClients';
+import { defaultPrismaClient } from '../db/client';
 import { logger } from '../utils/logger';
 
 const REQUIRED_PAYLOAD_FIELDS: ReadonlyArray<keyof JwtPayload> = [
@@ -118,17 +118,8 @@ export async function jwtMiddleware(
 
   req.tenantUser = new TenantUser({ ...payload, tenant_id: req.tenantId });
 
-  // Attach the correct Prisma client for this tenant (shared or dedicated DB)
-  try {
-    req.prisma = await getPrismaClient(req.tenantId);
-  } catch (err) {
-    logger.error({ err, requestId: req.id, tenantId: req.tenantId }, 'Failed to resolve tenant DB');
-    res.status(500).json({
-      success: false,
-      error: { code: 'INTERNAL_ERROR', message: 'Failed to connect to tenant database' },
-    });
-    return;
-  }
+  // All tenants share the same database — tenantId from JWT is used to filter queries
+  req.prisma = defaultPrismaClient;
 
   next();
 }

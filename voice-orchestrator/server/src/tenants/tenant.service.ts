@@ -1,7 +1,6 @@
-import type { Tenant, VoiceProvider } from '@prisma/client';
-import { TenantRepository, type CreateTenantInput, type UpsertProviderCredentialInput } from './tenant.repository';
+import type { VoiceProvider } from '@prisma/client';
+import { TenantRepository, type UpsertProviderCredentialInput } from './tenant.repository';
 import { defaultPrismaClient } from '../db/client';
-import { disconnectAllTenantClients } from '../db/tenantClients';
 import { logger } from '../utils/logger';
 
 export class TenantService {
@@ -9,48 +8,6 @@ export class TenantService {
 
   constructor() {
     this.repository = new TenantRepository(defaultPrismaClient);
-  }
-
-  /**
-   * Syncs a tenant record from SuperAdmin into the local DB.
-   * Creates or updates — does NOT delete (SuperAdmin is source of truth).
-   */
-  async syncTenant(input: CreateTenantInput): Promise<Tenant> {
-    const tenant = await this.repository.upsert(input);
-    logger.info({ tenantId: tenant.id, slug: tenant.slug }, 'Tenant synced');
-    return tenant;
-  }
-
-  async getTenantById(id: string): Promise<Tenant | null> {
-    return this.repository.findById(id);
-  }
-
-  async getTenantBySlug(slug: string): Promise<Tenant | null> {
-    return this.repository.findBySlug(slug);
-  }
-
-  /**
-   * Updates a tenant's dedicated database URL (encrypted at rest).
-   * After updating, evicts the cached Prisma client so the new URL takes effect.
-   */
-  async setTenantDatabaseUrl(tenantId: string, databaseUrl: string | null): Promise<void> {
-    if (databaseUrl) {
-      await this.repository.upsert({
-        id: tenantId,
-        slug: (await this.repository.findById(tenantId))?.slug ?? tenantId,
-        name: (await this.repository.findById(tenantId))?.name ?? tenantId,
-        databaseUrl,
-      });
-    } else {
-      await defaultPrismaClient.tenant.update({
-        where: { id: tenantId },
-        data: { databaseUrl: null },
-      });
-    }
-
-    // Force re-resolution of the Prisma client on next request
-    await disconnectAllTenantClients();
-    logger.info({ tenantId }, 'Tenant database URL updated — tenant clients evicted');
   }
 
   /**
@@ -86,11 +43,6 @@ export class TenantService {
     }
 
     return credentials.find((c) => c.isDefault) ?? credentials[0] ?? null;
-  }
-
-  async deactivateTenant(tenantId: string): Promise<void> {
-    await this.repository.setActive(tenantId, false);
-    logger.warn({ tenantId }, 'Tenant deactivated');
   }
 
   async logAuditEvent(data: {

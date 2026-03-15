@@ -2,7 +2,6 @@ import { createApp } from './core/server';
 import { config } from './core/config';
 import { logger } from './utils/logger';
 import { defaultPrismaClient } from './db/client';
-import { disconnectAllTenantClients } from './db/tenantClients';
 import { disconnectRedis } from './db/redis';
 import { startAllWorkers, stopAllWorkers } from './queue/index';
 import { initCallEventHandlers } from './events/handlers/callEvent.handler';
@@ -40,7 +39,6 @@ async function bootstrap(): Promise<void> {
       try {
         await stopAllWorkers();
         await disconnectEventBus();
-        await disconnectAllTenantClients();
         await defaultPrismaClient.$disconnect();
         await disconnectRedis();
         logger.info('All connections closed — exiting');
