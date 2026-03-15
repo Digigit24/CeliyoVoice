@@ -297,11 +297,11 @@ export class AgentImportService {
       }));
     } else {
       const svc = new BolnaService(creds.apiKey, creds.apiUrl);
-      const resp = await svc.listAgents(1, 100);
-      remoteAgents = (resp.agents ?? []).map((a) => ({
+      const agents = await svc.listAgents();
+      remoteAgents = agents.map((a) => ({
         id: a.id,
         name: a.agent_name,
-        is_active: a.agent_status === 'active',
+        is_active: a.agent_status === 'processed' || a.agent_status === 'active',
         updated_at: a.updated_at,
       }));
     }
