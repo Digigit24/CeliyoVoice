@@ -194,12 +194,12 @@ export interface OmnidimFullAgent {
   updated_at?: string;
 }
 
-/** Paginated list response from GET /agents */
+/** Paginated list response from GET /agents — Omnidim uses "bots" not "agents" */
 export interface OmnidimAgentListResponse {
-  agents: OmnidimFullAgent[];
-  total: number;
-  page: number;
-  page_size: number;
+  bots: OmnidimFullAgent[];
+  total_records: number;
+  page?: number;
+  page_size?: number;
   total_pages?: number;
 }
 

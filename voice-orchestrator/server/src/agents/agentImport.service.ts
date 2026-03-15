@@ -150,7 +150,7 @@ export class AgentImportService {
 
     while (true) {
       const resp = await svc.listAgents(page, pageSize);
-      const agents = resp.agents ?? [];
+      const agents = resp.bots ?? [];
       allAgents.push(...agents);
       if (agents.length < pageSize) break;
       page++;
@@ -199,7 +199,7 @@ export class AgentImportService {
     if (provider === 'OMNIDIM') {
       const svc = new OmnidimService(creds.apiKey, creds.apiUrl);
       const resp = await svc.listAgents(1, 100);
-      remoteAgents = (resp.agents ?? []).map((a) => ({
+      remoteAgents = (resp.bots ?? []).map((a) => ({
         id: a.id,
         name: a.name,
         call_type: a.call_type,
