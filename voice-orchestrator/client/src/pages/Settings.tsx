@@ -47,7 +47,10 @@ export default function Settings() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (payload: typeof emptyForm) => api.post('/providers/credentials', payload),
+    mutationFn: (payload: typeof emptyForm) => {
+      const { apiUrl, ...rest } = payload;
+      return api.post('/providers/credentials', apiUrl ? { ...rest, apiUrl } : rest);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['credentials'] });
       setDialogOpen(false);
@@ -57,8 +60,10 @@ export default function Settings() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: typeof emptyForm }) =>
-      api.put(`/providers/credentials/${id}`, payload),
+    mutationFn: ({ id, payload }: { id: string; payload: typeof emptyForm }) => {
+      const { apiUrl, ...rest } = payload;
+      return api.put(`/providers/credentials/${id}`, apiUrl ? { ...rest, apiUrl } : rest);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['credentials'] });
       setDialogOpen(false);
