@@ -167,12 +167,71 @@ export const listRemoteOmnidim: RequestHandler = async (req, res) => {
   }
 };
 
+/** POST /api/v1/agents/import/bolna */
+export const importSingleBolna: RequestHandler = async (req, res) => {
+  logger.info({ body: req.body }, 'importSingleBolna: received request body');
+  const parsed = ImportSingleSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return errorResponse(res, 'Validation failed', 'VALIDATION_ERROR', 400, parsed.error.flatten());
+  }
+
+  try {
+    const svc = new AgentImportService(req.prisma!);
+    const { agent, action } = await svc.importFromBolna(
+      req.tenantId!,
+      req.userId!,
+      parsed.data.agentId,
+    );
+    return success(res, { agent, action }, action === 'created' ? 201 : 200);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Import failed';
+    logger.warn({ err, tenantId: req.tenantId }, 'importSingleBolna failed');
+    if (message.includes('No credentials configured')) {
+      return errorResponse(res, message, 'CREDENTIALS_MISSING', 400);
+    }
+    if (message.includes('Authentication failed')) {
+      return errorResponse(res, message, 'PROVIDER_AUTH_ERROR', 401);
+    }
+    return errorResponse(res, 'Provider temporarily unavailable', 'PROVIDER_ERROR', 502);
+  }
+};
+
+/** POST /api/v1/agents/import/bolna/all */
+export const importAllBolna: RequestHandler = async (req, res) => {
+  try {
+    const svc = new AgentImportService(req.prisma!);
+    const result = await svc.importAllFromBolna(req.tenantId!, req.userId!);
+    return success(res, result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Import failed';
+    logger.warn({ err, tenantId: req.tenantId }, 'importAllBolna failed');
+    if (message.includes('No credentials configured')) {
+      return errorResponse(res, message, 'CREDENTIALS_MISSING', 400);
+    }
+    if (message.includes('Authentication failed')) {
+      return errorResponse(res, message, 'PROVIDER_AUTH_ERROR', 401);
+    }
+    return errorResponse(res, 'Provider temporarily unavailable', 'PROVIDER_ERROR', 502);
+  }
+};
+
 /** GET /api/v1/agents/remote/bolna */
-export const listRemoteBolna: RequestHandler = async (_req, res) => {
-  return success(res, {
-    agents: [],
-    message: 'Bolna import coming soon',
-  });
+export const listRemoteBolna: RequestHandler = async (req, res) => {
+  try {
+    const svc = new AgentImportService(req.prisma!);
+    const agents = await svc.listRemoteAgents(req.tenantId!, 'BOLNA');
+    return success(res, agents);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to list remote agents';
+    logger.warn({ err, tenantId: req.tenantId }, 'listRemoteBolna failed');
+    if (message.includes('No credentials configured')) {
+      return errorResponse(res, message, 'CREDENTIALS_MISSING', 400);
+    }
+    if (message.includes('Authentication failed')) {
+      return errorResponse(res, message, 'PROVIDER_AUTH_ERROR', 401);
+    }
+    return errorResponse(res, 'Provider temporarily unavailable', 'PROVIDER_ERROR', 502);
+  }
 };
 
 // ── Sync handler ──────────────────────────────────────────────────────────────

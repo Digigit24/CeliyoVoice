@@ -65,6 +65,42 @@ export const getCall: RequestHandler<IdParam> = async (req, res) => {
 };
 
 /**
+ * GET /api/v1/calls/logs/bolna
+ * Fetch execution logs from Bolna for an agent.
+ * Query params: agentId (our UUID), page, pageSize
+ */
+export const listBolnaLogs: RequestHandler = async (req, res) => {
+  const { agentId, page, pageSize } = req.query as Record<string, string | undefined>;
+
+  try {
+    const svc = new CallService(req.prisma!);
+
+    let agentProviderAgentId: string | undefined;
+    if (agentId) {
+      const agent = await req.prisma!.agent.findFirst({
+        where: { id: agentId, tenantId: req.tenantId! },
+        select: { providerAgentId: true },
+      });
+      agentProviderAgentId = agent?.providerAgentId ?? undefined;
+    }
+
+    const result = await svc.listBolnaExecutions(req.tenantId!, {
+      agentProviderAgentId,
+      page: page ? parseInt(page, 10) : 1,
+      pageSize: pageSize ? parseInt(pageSize, 10) : 20,
+    });
+
+    return success(res, result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to fetch Bolna logs';
+    if (message.includes('No credentials')) {
+      return errorResponse(res, message, 'CREDENTIALS_MISSING', 400);
+    }
+    return errorResponse(res, 'Failed to fetch call logs from Bolna', 'PROVIDER_ERROR', 502);
+  }
+};
+
+/**
  * GET /api/v1/calls/logs/remote
  * Fetch call logs directly from Omnidim.
  * Query params: agentId (our UUID), page, pageSize, call_status

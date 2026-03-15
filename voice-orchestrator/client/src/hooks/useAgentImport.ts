@@ -44,7 +44,7 @@ export function useRemoteAgents(provider: 'omnidim' | 'bolna', enabled = true) {
   });
 }
 
-// ── Single import ─────────────────────────────────────────────────────────────
+// ── Single import (Omnidim) ───────────────────────────────────────────────────
 
 export function useImportAgent() {
   const queryClient = useQueryClient();
@@ -63,7 +63,7 @@ export function useImportAgent() {
   });
 }
 
-// ── Bulk import ───────────────────────────────────────────────────────────────
+// ── Bulk import (Omnidim) ─────────────────────────────────────────────────────
 
 export function useImportAllAgents() {
   const queryClient = useQueryClient();
@@ -77,6 +77,43 @@ export function useImportAllAgents() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agents'] });
       queryClient.invalidateQueries({ queryKey: ['remote-agents', 'omnidim'] });
+    },
+  });
+}
+
+// ── Single import (Bolna) ─────────────────────────────────────────────────────
+
+export function useImportBolnaAgent() {
+  const queryClient = useQueryClient();
+  return useMutation<ImportAgentResponse, Error, string>({
+    mutationFn: async (agentId: string) => {
+      const { data } = await api.post<{ success: boolean; data: ImportAgentResponse }>(
+        '/agents/import/bolna',
+        { agentId },
+      );
+      return data.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agents'] });
+      queryClient.invalidateQueries({ queryKey: ['remote-agents', 'bolna'] });
+    },
+  });
+}
+
+// ── Bulk import (Bolna) ───────────────────────────────────────────────────────
+
+export function useImportAllBolnaAgents() {
+  const queryClient = useQueryClient();
+  return useMutation<ImportResult, Error, void>({
+    mutationFn: async () => {
+      const { data } = await api.post<{ success: boolean; data: ImportResult }>(
+        '/agents/import/bolna/all',
+      );
+      return data.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agents'] });
+      queryClient.invalidateQueries({ queryKey: ['remote-agents', 'bolna'] });
     },
   });
 }

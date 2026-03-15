@@ -7,6 +7,8 @@ export interface AgentCreatePayload {
   voiceLanguage: string;
   voiceModel: string;
   systemPrompt: string;
+  language?: string;
+  welcomeMessage?: string;
   knowledgebaseId?: string;
   tools?: string[];
   workflowId?: string;
@@ -19,6 +21,7 @@ export interface AgentUpdatePayload {
   voiceLanguage?: string;
   voiceModel?: string;
   systemPrompt?: string;
+  welcomeMessage?: string;
   knowledgebaseId?: string;
   tools?: string[];
   maxConcurrentCalls?: number;
@@ -37,6 +40,7 @@ export interface StartCallPayload {
   /** Our internal call ID — sent as reference for webhook correlation */
   callId: string;
   tenantId: string;
+  fromPhone?: string;
   metadata?: Record<string, unknown>;
 }
 

@@ -20,6 +20,9 @@ import {
   Sparkles,
   AlertCircle,
   Globe,
+  Bot,
+  TrendingUp,
+  FileText,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -98,6 +101,46 @@ interface Agent {
   name: string;
   provider: string;
   providerAgentId?: string;
+}
+
+interface BolnaCostBreakdown {
+  llm?: number;
+  network?: number;
+  platform?: number;
+  synthesizer?: number;
+  transcriber?: number;
+}
+
+interface BolnaTelephonyData {
+  duration?: number;
+  to_number?: string;
+  from_number?: string;
+  recording_url?: string;
+  provider_call_id?: string;
+  call_type?: string;
+  provider?: string;
+  hangup_by?: string;
+  hangup_reason?: string;
+  hangup_provider_code?: number;
+  ring_duration?: number;
+  to_number_carrier?: string;
+}
+
+interface BolnaExecution {
+  id: string;
+  agent_id: string;
+  batch_id?: string;
+  conversation_time?: number;
+  total_cost?: number;
+  status: string;
+  error_message?: string | null;
+  answered_by_voice_mail?: boolean;
+  transcript?: string | null;
+  created_at: string;
+  updated_at: string;
+  cost_breakdown?: BolnaCostBreakdown;
+  telephony_data?: BolnaTelephonyData;
+  extracted_data?: Record<string, unknown>;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -827,11 +870,370 @@ function LocalCallsTab() {
   );
 }
 
+// ── Bolna execution drawer ────────────────────────────────────────────────────
+
+function BolnaExecutionDrawer({ exec, onClose }: { exec: BolnaExecution; onClose: () => void }) {
+  const tel = exec.telephony_data;
+  const cb = exec.cost_breakdown;
+  const secs = tel?.duration ?? exec.conversation_time ?? 0;
+  const dur = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : secs ? `${secs}s` : '—';
+  const isOutbound = (tel?.call_type ?? '').toLowerCase() === 'outbound';
+
+  const BOLNA_STATUS_CONFIG: Record<string, { label: string; dot: string; bg: string; text: string }> = {
+    completed:   { label: 'Completed',   dot: 'bg-green-500',  bg: 'bg-green-50 dark:bg-green-950/30',  text: 'text-green-700 dark:text-green-400' },
+    failed:      { label: 'Failed',      dot: 'bg-red-500',    bg: 'bg-red-50 dark:bg-red-950/30',      text: 'text-red-700 dark:text-red-400' },
+    in_progress: { label: 'In Progress', dot: 'bg-blue-500',   bg: 'bg-blue-50 dark:bg-blue-950/30',    text: 'text-blue-700 dark:text-blue-400' },
+    queued:      { label: 'Queued',      dot: 'bg-gray-400',   bg: 'bg-muted',                          text: 'text-muted-foreground' },
+  };
+  const statusKey = exec.status.toLowerCase();
+  const statusCfg = BOLNA_STATUS_CONFIG[statusKey] ?? { label: exec.status, dot: 'bg-gray-400', bg: 'bg-muted', text: 'text-muted-foreground' };
+
+  return (
+    <div className="fixed inset-0 z-50 flex">
+      <div className="flex-1 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="w-full max-w-xl overflow-y-auto bg-background shadow-2xl ring-1 ring-border">
+        {/* Header */}
+        <div className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur-sm px-6 py-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${statusCfg.bg} ${statusCfg.text}`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${statusCfg.dot}`} />
+                  {statusCfg.label}
+                </span>
+                <span className="rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 px-2.5 py-1 text-xs font-medium">
+                  Bolna
+                </span>
+                {exec.answered_by_voice_mail && (
+                  <span className="rounded-full bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 px-2.5 py-1 text-xs font-medium">
+                    Voicemail
+                  </span>
+                )}
+              </div>
+              <p className="mt-1.5 text-lg font-semibold truncate font-mono">
+                {tel?.to_number ?? tel?.from_number ?? exec.id.slice(0, 8)}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {new Date(exec.created_at).toLocaleString(undefined, {
+                  month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit',
+                })}
+              </p>
+            </div>
+            <Button variant="ghost" size="icon" onClick={onClose} className="shrink-0 -mr-2">
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+
+        <div className="space-y-5 p-6">
+          {/* Quick stats */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-lg border bg-muted/30 p-3 text-center">
+              <Clock className="mx-auto h-4 w-4 text-muted-foreground mb-1" />
+              <p className="text-base font-semibold">{dur}</p>
+              <p className="text-xs text-muted-foreground">Duration</p>
+            </div>
+            <div className="rounded-lg border bg-muted/30 p-3 text-center">
+              <DollarSign className="mx-auto h-4 w-4 text-muted-foreground mb-1" />
+              <p className="text-base font-semibold">${(exec.total_cost ?? 0).toFixed(4)}</p>
+              <p className="text-xs text-muted-foreground">Total Cost</p>
+            </div>
+            <div className="rounded-lg border bg-muted/30 p-3 text-center">
+              <TrendingUp className="mx-auto h-4 w-4 text-muted-foreground mb-1" />
+              <p className="text-base font-semibold">{tel?.ring_duration != null ? `${tel.ring_duration}s` : '—'}</p>
+              <p className="text-xs text-muted-foreground">Ring Time</p>
+            </div>
+          </div>
+
+          {/* Telephony info */}
+          <div className="rounded-lg border divide-y">
+            <Row label="Direction" value={
+              <span className="flex items-center gap-1 capitalize">
+                {isOutbound
+                  ? <PhoneOutgoing className="h-3.5 w-3.5 text-purple-500" />
+                  : <PhoneIncoming className="h-3.5 w-3.5 text-green-500" />}
+                {tel?.call_type ?? '—'}
+              </span>
+            } />
+            <Row label="From" value={tel?.from_number} />
+            <Row label="To" value={tel?.to_number} />
+            <Row label="Carrier" value={tel?.to_number_carrier} />
+            <Row label="Telephony" value={tel?.provider} />
+            {(tel?.hangup_by || tel?.hangup_reason) && (
+              <Row label="Hangup" value={[tel.hangup_by, tel.hangup_reason].filter(Boolean).join(' · ')} />
+            )}
+            {exec.error_message && (
+              <Row label="Error" value={<span className="text-destructive text-xs">{exec.error_message}</span>} />
+            )}
+          </div>
+
+          {/* Recording */}
+          {tel?.recording_url && (
+            <div className="rounded-lg border p-4 space-y-3">
+              <p className="flex items-center gap-1.5 text-sm font-medium">
+                <Mic className="h-4 w-4 text-muted-foreground" /> Recording
+              </p>
+              <audio controls src={tel.recording_url} className="w-full h-10" preload="metadata">
+                Your browser does not support audio.
+              </audio>
+              <a href={tel.recording_url} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                <ExternalLink className="h-3 w-3" />Open in new tab
+              </a>
+            </div>
+          )}
+
+          {/* Cost breakdown */}
+          {cb && Object.keys(cb).length > 0 && (
+            <div className="rounded-lg border p-4">
+              <p className="mb-3 flex items-center gap-1.5 text-sm font-medium">
+                <DollarSign className="h-4 w-4 text-muted-foreground" /> Cost Breakdown
+              </p>
+              <div className="space-y-2">
+                {Object.entries(cb).filter(([, v]) => v != null).map(([k, v]) => (
+                  <div key={k} className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground capitalize">{k}</span>
+                    <span className="font-medium">${Number(v).toFixed(4)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Transcript */}
+          {exec.transcript && (
+            <div className="rounded-lg border p-4">
+              <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
+                <FileText className="h-4 w-4 text-muted-foreground" /> Transcript
+              </p>
+              <div className="max-h-60 overflow-y-auto">
+                <pre className="whitespace-pre-wrap text-xs text-muted-foreground leading-relaxed">{exec.transcript}</pre>
+              </div>
+            </div>
+          )}
+
+          {/* Extracted data */}
+          {exec.extracted_data && Object.keys(exec.extracted_data).length > 0 && (
+            <div className="rounded-lg border p-4">
+              <p className="mb-3 flex items-center gap-1.5 text-sm font-medium">
+                <BarChart2 className="h-4 w-4 text-muted-foreground" /> Extracted Data
+              </p>
+              <div className="space-y-2">
+                {Object.entries(exec.extracted_data).map(([k, v]) => (
+                  <div key={k} className="flex items-start justify-between gap-3 text-sm">
+                    <span className="text-muted-foreground capitalize shrink-0">{k.replace(/_/g, ' ')}</span>
+                    <span className="text-right font-medium">{String(v ?? '—')}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Execution ID */}
+          <div className="rounded-lg border divide-y">
+            <div className="px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Technical</div>
+            <Row label="Execution ID" value={<span className="font-mono text-xs">{exec.id}</span>} />
+            {exec.batch_id && <Row label="Batch ID" value={<span className="font-mono text-xs">{exec.batch_id}</span>} />}
+            {tel?.provider_call_id && <Row label="Provider Call ID" value={<span className="font-mono text-xs">{tel.provider_call_id}</span>} />}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Bolna logs tab ────────────────────────────────────────────────────────────
+
+function BolnaLogsTab() {
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [agentFilter, setAgentFilter] = useState('all');
+  const [page, setPage] = useState(1);
+  const [selectedExec, setSelectedExec] = useState<BolnaExecution | null>(null);
+  const PAGE_SIZE = 20;
+
+  const { data: agentsData } = useQuery<{ data: Agent[] }>({
+    queryKey: ['agents-bolna-filter'],
+    queryFn: () => api.get('/agents', { params: { provider: 'BOLNA', limit: 100 } }).then((r) => r.data),
+  });
+  const bolnaAgents = agentsData?.data ?? [];
+
+  const { data, isLoading, error, refetch, isFetching } = useQuery<{
+    data: { executions: BolnaExecution[]; total: number; hasMore: boolean };
+  }>({
+    queryKey: ['bolna-executions', agentFilter, statusFilter, page],
+    queryFn: () =>
+      api.get('/calls/logs/bolna', {
+        params: {
+          agentId: agentFilter !== 'all' ? agentFilter : undefined,
+          page,
+          pageSize: PAGE_SIZE,
+        },
+      }).then((r) => r.data),
+    refetchInterval: 30_000,
+    enabled: agentFilter !== 'all', // Only fetch when agent is selected
+  });
+
+  const executions = data?.data?.executions ?? [];
+  const total = data?.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  const filteredExecs = statusFilter !== 'all'
+    ? executions.filter((e) => e.status.toLowerCase() === statusFilter)
+    : executions;
+
+  return (
+    <>
+      <div className="space-y-3">
+        {/* Filters */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <Select value={agentFilter} onValueChange={(v) => { setAgentFilter(v); setPage(1); }}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Select agent" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All agents</SelectItem>
+              {bolnaAgents.map((a) => (
+                <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
+            <SelectTrigger className="w-[150px]">
+              <SelectValue placeholder="All statuses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="completed">Completed</SelectItem>
+              <SelectItem value="failed">Failed</SelectItem>
+              <SelectItem value="in_progress">In Progress</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching || agentFilter === 'all'} className="gap-1.5">
+            <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+
+          {total > 0 && (
+            <span className="ml-auto text-sm text-muted-foreground">
+              {total} execution{total !== 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
+
+        {agentFilter === 'all' ? (
+          <div className="flex h-60 items-center justify-center rounded-xl border border-dashed">
+            <div className="text-center">
+              <Bot className="mx-auto h-10 w-10 text-muted-foreground/40 mb-3" />
+              <p className="text-sm font-medium">Select an agent</p>
+              <p className="text-xs text-muted-foreground mt-1">Choose a Bolna agent to view its execution logs</p>
+            </div>
+          </div>
+        ) : isLoading ? (
+          <div className="flex h-60 items-center justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : error ? (
+          <div className="flex h-40 items-center justify-center rounded-xl border border-destructive/30 bg-destructive/5">
+            <div className="text-center">
+              <AlertCircle className="mx-auto h-8 w-8 text-destructive/60 mb-2" />
+              <p className="text-sm text-destructive">Failed to load Bolna executions</p>
+            </div>
+          </div>
+        ) : filteredExecs.length === 0 ? (
+          <div className="flex h-60 items-center justify-center rounded-xl border border-dashed">
+            <div className="text-center">
+              <Phone className="mx-auto h-10 w-10 text-muted-foreground/40 mb-3" />
+              <p className="text-sm font-medium">No executions found</p>
+              <p className="text-xs text-muted-foreground mt-1">Dispatch a Bolna call to get started</p>
+            </div>
+          </div>
+        ) : (
+          <Card className="overflow-hidden p-0">
+            <div className="divide-y">
+              {filteredExecs.map((exec) => {
+                const tel = exec.telephony_data;
+                const secs = tel?.duration ?? exec.conversation_time ?? 0;
+                const dur = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : secs ? `${secs}s` : '—';
+                const phone = tel?.to_number ?? tel?.from_number ?? '—';
+                const statusKey = exec.status.toLowerCase();
+                const statusColors: Record<string, string> = {
+                  completed: 'bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400',
+                  failed: 'bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400',
+                  in_progress: 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400',
+                };
+                const statusCls = statusColors[statusKey] ?? 'bg-muted text-muted-foreground';
+                const statusDots: Record<string, string> = { completed: 'bg-green-500', failed: 'bg-red-500', in_progress: 'bg-blue-500' };
+                const dot = statusDots[statusKey] ?? 'bg-gray-400';
+
+                return (
+                  <button
+                    key={exec.id}
+                    onClick={() => setSelectedExec(exec)}
+                    className="w-full flex items-center gap-4 px-5 py-4 text-left hover:bg-muted/50 transition-colors group"
+                  >
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-purple-50 dark:bg-purple-950/50">
+                      <PhoneOutgoing className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm font-mono">{phone}</span>
+                        <span className="rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 px-1.5 py-0.5 text-xs font-medium">Bolna</span>
+                        {exec.answered_by_voice_mail && (
+                          <span className="text-xs text-muted-foreground">Voicemail</span>
+                        )}
+                      </div>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {new Date(exec.created_at).toLocaleString(undefined, {
+                          month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                        })}
+                        {tel?.hangup_reason && ` · ${tel.hangup_reason}`}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${statusCls}`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+                        {exec.status}
+                      </span>
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <Clock className="h-3 w-3" />{dur}
+                      </div>
+                      {exec.total_cost != null && (
+                        <div className="flex items-center gap-0.5 text-xs text-muted-foreground">
+                          <DollarSign className="h-3 w-3" />{exec.total_cost.toFixed(3)}
+                        </div>
+                      )}
+                      <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </Card>
+        )}
+
+        {totalPages > 1 && agentFilter !== 'all' && (
+          <div className="flex items-center justify-center gap-3">
+            <Button variant="outline" size="sm" onClick={() => setPage(p => p - 1)} disabled={page <= 1}>Previous</Button>
+            <span className="text-sm text-muted-foreground">Page {page} of {totalPages}</span>
+            <Button variant="outline" size="sm" onClick={() => setPage(p => p + 1)} disabled={page >= totalPages}>Next</Button>
+          </div>
+        )}
+      </div>
+
+      {selectedExec && (
+        <BolnaExecutionDrawer exec={selectedExec} onClose={() => setSelectedExec(null)} />
+      )}
+    </>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Calls() {
   const [dispatchOpen, setDispatchOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'omnidim' | 'local'>('omnidim');
+  const [activeTab, setActiveTab] = useState<'omnidim' | 'bolna' | 'local'>('omnidim');
   const [activeCall, setActiveCall] = useState<{ phone: string; agentName: string } | null>(null);
 
   const handleDispatched = (phone: string, agentName: string) => {
@@ -864,23 +1266,29 @@ export default function Calls() {
 
       {/* Tab toggle */}
       <div className="flex gap-1 rounded-lg bg-muted p-1 w-fit">
-        {(['omnidim', 'local'] as const).map((tab) => (
+        {([
+          { id: 'omnidim', label: 'Omnidim Logs' },
+          { id: 'bolna',   label: 'Bolna Executions' },
+          { id: 'local',   label: 'Local Records' },
+        ] as const).map(({ id, label }) => (
           <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
+            key={id}
+            onClick={() => setActiveTab(id)}
             className={`rounded-md px-4 py-1.5 text-sm font-medium transition-all ${
-              activeTab === tab
+              activeTab === id
                 ? 'bg-background text-foreground shadow-sm'
                 : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            {tab === 'omnidim' ? 'Omnidim Logs' : 'Local Records'}
+            {label}
           </button>
         ))}
       </div>
 
       {/* Tab content */}
-      {activeTab === 'omnidim' ? <OmnidimLogsTab /> : <LocalCallsTab />}
+      {activeTab === 'omnidim' && <OmnidimLogsTab />}
+      {activeTab === 'bolna' && <BolnaLogsTab />}
+      {activeTab === 'local' && <LocalCallsTab />}
 
       {/* Dispatch dialog */}
       <DispatchDialog

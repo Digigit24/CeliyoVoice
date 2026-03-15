@@ -4,7 +4,9 @@ import { callQueue } from '../queue/queues';
 import { getProvider } from '../providers/providerRouter';
 import { resolveCredentials } from '../providers/credentialResolver';
 import { OmnidimService } from '../providers/omnidim/omnidim.service';
+import { BolnaService } from '../providers/bolna/bolna.service';
 import type { OmnidimCallLogEntry } from '../providers/omnidim/omnidim.types';
+import type { BolnaExecution, BolnaExecutionListResponse } from '../providers/bolna/bolna.types';
 import { logger } from '../utils/logger';
 import type { StartCallInput } from './validators/call.validators';
 
@@ -104,6 +106,47 @@ export class CallService {
       return this.prisma.call.findUniqueOrThrow({ where: { id: call.id } });
     }
 
+    // For Bolna: dispatch directly via API
+    if (agent.provider === 'BOLNA') {
+      if (!agent.providerAgentId) {
+        await this.prisma.call.update({ where: { id: call.id }, data: { status: 'FAILED' } });
+        const err = new Error('Agent has not been imported from Bolna yet (no providerAgentId)');
+        (err as NodeJS.ErrnoException & { statusCode: number }).statusCode = 400;
+        throw err;
+      }
+
+      try {
+        const creds = await resolveCredentials(tenantId, 'BOLNA', this.prisma);
+        const svc = new BolnaService(creds.apiKey, creds.apiUrl);
+
+        const dispatchPayload = {
+          agent_id: agent.providerAgentId,
+          recipient_phone_number: input.phone,
+          ...(input.fromNumberId ? { from_phone_number: input.fromNumberId } : {}),
+          ...(input.callContext ? { user_data: input.callContext as Record<string, string> } : {}),
+        };
+
+        logger.info({ tenantId, callId: call.id, dispatchPayload }, 'Dispatching call to Bolna');
+        const response = await svc.dispatchCall(dispatchPayload);
+
+        await this.prisma.call.update({
+          where: { id: call.id },
+          data: {
+            status: 'RINGING',
+            providerCallId: response.execution_id || null,
+            startedAt: new Date(),
+          },
+        });
+
+        logger.info({ callId: call.id, executionId: response.execution_id }, 'Call dispatched to Bolna');
+      } catch (err) {
+        await this.prisma.call.update({ where: { id: call.id }, data: { status: 'FAILED' } });
+        throw err;
+      }
+
+      return this.prisma.call.findUniqueOrThrow({ where: { id: call.id } });
+    }
+
     // For other providers: use queue
     await callQueue.add(
       'start-call' as string,
@@ -145,6 +188,44 @@ export class CallService {
     const total = resp.total_records ?? resp.total ?? logs.length;
 
     return { logs, total };
+  }
+
+  /**
+   * Fetch execution logs from Bolna for an agent or all agents.
+   */
+  async listBolnaExecutions(
+    tenantId: string,
+    opts: { agentProviderAgentId?: string; page?: number; pageSize?: number },
+  ): Promise<{ executions: BolnaExecution[]; total: number; hasMore: boolean }> {
+    const creds = await resolveCredentials(tenantId, 'BOLNA', this.prisma);
+    const svc = new BolnaService(creds.apiKey, creds.apiUrl);
+
+    if (!opts.agentProviderAgentId) {
+      // Without an agent filter, we can't list all executions on Bolna.
+      // Return empty; callers should always pass an agentId.
+      return { executions: [], total: 0, hasMore: false };
+    }
+
+    const resp: BolnaExecutionListResponse = await svc.getAgentExecutions(
+      opts.agentProviderAgentId,
+      opts.page ?? 1,
+      opts.pageSize ?? 20,
+    );
+
+    return {
+      executions: resp.data ?? [],
+      total: resp.total ?? 0,
+      hasMore: resp.has_more ?? false,
+    };
+  }
+
+  /**
+   * Fetch a single Bolna execution by ID.
+   */
+  async getBolnaExecution(tenantId: string, executionId: string): Promise<BolnaExecution> {
+    const creds = await resolveCredentials(tenantId, 'BOLNA', this.prisma);
+    const svc = new BolnaService(creds.apiKey, creds.apiUrl);
+    return svc.getExecution(executionId);
   }
 
   async endCall(id: string, tenantId: string): Promise<Call | null> {

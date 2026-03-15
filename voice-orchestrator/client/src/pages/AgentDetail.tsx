@@ -113,6 +113,60 @@ interface OmnidimConfig {
   [key: string]: unknown;
 }
 
+// Bolna config shape (matches BolnaAgentV2)
+interface BolnaTaskConfig {
+  task_type?: string;
+  tools_config?: {
+    llm_agent?: {
+      llm_config?: {
+        provider?: string;
+        model?: string;
+        temperature?: number;
+        max_tokens?: number;
+      };
+    };
+    synthesizer?: {
+      provider?: string;
+      provider_config?: { voice?: string; voice_id?: string; model?: string };
+      audio_format?: string;
+    };
+    transcriber?: {
+      provider?: string;
+      model?: string;
+      language?: string;
+      endpointing?: number;
+    };
+    input?: { provider?: string };
+    output?: { provider?: string };
+  };
+  task_config?: {
+    hangup_after_silence?: number;
+    incremental_delay?: number;
+    number_of_words_for_interruption?: number;
+    call_terminate?: number;
+    backchanneling?: boolean;
+    ambient_noise?: boolean;
+    ambient_noise_track?: string;
+    voicemail?: boolean;
+  };
+}
+
+interface BolnaConfig {
+  id?: string;
+  agent_name?: string;
+  agent_type?: string;
+  agent_status?: string;
+  agent_welcome_message?: string;
+  webhook_url?: string | null;
+  tasks?: BolnaTaskConfig[];
+  agent_prompts?: { task_1?: { system_prompt?: string } };
+  [key: string]: unknown;
+}
+
+function isBolnaConfig(cfg: unknown): cfg is BolnaConfig {
+  return cfg != null && typeof cfg === 'object' && 'tasks' in (cfg as object);
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function CopyButton({ text }: { text: string }) {
@@ -226,7 +280,10 @@ function OverviewTab({ agentId }: { agentId: string }) {
     );
   }
 
-  const cfg = agent.providerConfig as OmnidimConfig | null;
+  const rawCfg = agent.providerConfig as OmnidimConfig | BolnaConfig | null;
+  const cfg = isBolnaConfig(rawCfg) ? null : rawCfg as OmnidimConfig | null;
+  const bolnaCfg = isBolnaConfig(rawCfg) ? rawCfg : null;
+  const bolnaTask = bolnaCfg?.tasks?.[0];
 
   const handleSavePrompt = async () => {
     try {
@@ -268,8 +325,15 @@ function OverviewTab({ agentId }: { agentId: string }) {
             } />
           )}
           <InfoRow label="Language" value={agent.voiceLanguage} />
-          <InfoRow label="Voice" value={cfg?.voice_name ?? agent.voiceModel} />
-          <InfoRow label="Voice Provider" value={cfg?.voice_provider} />
+          <InfoRow label="Voice" value={
+            cfg?.voice_name
+              ?? bolnaTask?.tools_config?.synthesizer?.provider_config?.voice
+              ?? agent.voiceModel
+          } />
+          <InfoRow label="Voice Provider" value={
+            cfg?.voice_provider
+              ?? bolnaTask?.tools_config?.synthesizer?.provider
+          } />
           <InfoRow label="Call Type" value={
             <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
               (agent.callType ?? 'Incoming') === 'Outgoing'
@@ -303,6 +367,15 @@ function OverviewTab({ agentId }: { agentId: string }) {
               <InfoRow label="LLM Temp" value={cfg.llm_temperature} />
               <InfoRow label="ASR Service" value={cfg.asr_service} />
               <InfoRow label="Cost/min" value={cfg.call_cost_per_min != null ? `$${cfg.call_cost_per_min}` : undefined} />
+            </>
+          )}
+          {bolnaTask && (
+            <>
+              <Separator className="my-1" />
+              <InfoRow label="LLM" value={<span className="font-mono text-xs">{bolnaTask.tools_config?.llm_agent?.llm_config?.model}</span>} />
+              <InfoRow label="LLM Provider" value={bolnaTask.tools_config?.llm_agent?.llm_config?.provider} />
+              <InfoRow label="ASR" value={`${bolnaTask.tools_config?.transcriber?.provider ?? ''} ${bolnaTask.tools_config?.transcriber?.model ?? ''}`.trim() || undefined} />
+              <InfoRow label="Telephony" value={bolnaTask.tools_config?.input?.provider} />
             </>
           )}
         </CardContent>
@@ -428,15 +501,22 @@ function ProviderConfigTab({ agentId }: { agentId: string }) {
 
   if (!agent) return null;
 
-  const cfg = agent.providerConfig as OmnidimConfig | null;
+  const rawCfgP = agent.providerConfig as OmnidimConfig | BolnaConfig | null;
+  const cfg = isBolnaConfig(rawCfgP) ? null : rawCfgP as OmnidimConfig | null;
+  const bolnaCfgP = isBolnaConfig(rawCfgP) ? rawCfgP : null;
 
   return (
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          Live config from {agent.provider}. Sync to refresh from provider.
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm text-muted-foreground">
+            Live config from {agent.provider}. Sync to refresh from provider.
+          </p>
+          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${PROVIDER_COLORS[agent.provider] ?? 'bg-muted'}`}>
+            {agent.provider}
+          </span>
+        </div>
         {agent.providerAgentId && (
           <Button variant="outline" size="sm" onClick={handleSync} disabled={syncMutation.isPending}>
             {syncMutation.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1 h-3.5 w-3.5" />}
@@ -445,10 +525,13 @@ function ProviderConfigTab({ agentId }: { agentId: string }) {
         )}
       </div>
 
-      {!cfg ? (
+      {!rawCfgP ? (
         <div className="flex h-40 items-center justify-center rounded-md border border-dashed">
           <p className="text-sm text-muted-foreground">No provider config stored. Import this agent to populate config.</p>
         </div>
+      ) : bolnaCfgP ? (
+        // ── Bolna config layout ──────────────────────────────────────────
+        <BolnaConfigView cfg={bolnaCfgP} />
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {/* Voice */}
@@ -583,6 +666,79 @@ function ProviderConfigTab({ agentId }: { agentId: string }) {
   );
 }
 
+// ── Bolna config view ─────────────────────────────────────────────────────────
+
+function BolnaConfigView({ cfg }: { cfg: BolnaConfig }) {
+  const task = cfg.tasks?.[0];
+  const llm = task?.tools_config?.llm_agent?.llm_config;
+  const synth = task?.tools_config?.synthesizer;
+  const trans = task?.tools_config?.transcriber;
+  const taskCfg = task?.task_config;
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      {/* Voice / Synthesizer */}
+      <SectionCard icon={<Mic className="h-4 w-4" />} title={<span className="flex items-center gap-1.5">Voice <span className="rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 px-1.5 py-0.5 text-xs font-medium">Bolna</span></span>}>
+        <InfoRow label="Provider" value={synth?.provider} />
+        <InfoRow label="Voice" value={synth?.provider_config?.voice ?? synth?.provider_config?.voice_id} />
+        <InfoRow label="TTS Model" value={synth?.provider_config?.model} />
+        <InfoRow label="Format" value={synth?.audio_format} />
+      </SectionCard>
+
+      {/* LLM */}
+      <SectionCard icon={<Brain className="h-4 w-4" />} title={<span className="flex items-center gap-1.5">AI Model <span className="rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 px-1.5 py-0.5 text-xs font-medium">Bolna</span></span>}>
+        <InfoRow label="Provider" value={llm?.provider} />
+        <InfoRow label="Model" value={<span className="font-mono text-xs">{llm?.model}</span>} />
+        <InfoRow label="Temperature" value={llm?.temperature} />
+        <InfoRow label="Max Tokens" value={llm?.max_tokens} />
+      </SectionCard>
+
+      {/* Transcriber (ASR) */}
+      <SectionCard icon={<Settings2 className="h-4 w-4" />} title="Speech Recognition (ASR)">
+        <InfoRow label="Provider" value={trans?.provider} />
+        <InfoRow label="Model" value={<span className="font-mono text-xs">{trans?.model}</span>} />
+        <InfoRow label="Language" value={trans?.language} />
+        <InfoRow label="Endpointing" value={trans?.endpointing != null ? `${trans.endpointing}ms` : undefined} />
+      </SectionCard>
+
+      {/* Call config */}
+      <SectionCard icon={<Phone className="h-4 w-4" />} title="Call Behavior">
+        <InfoRow label="Hangup after silence" value={taskCfg?.hangup_after_silence != null ? `${taskCfg.hangup_after_silence}s` : undefined} />
+        <InfoRow label="Max call duration" value={taskCfg?.call_terminate != null ? `${taskCfg.call_terminate}s` : undefined} />
+        <InfoRow label="Incremental delay" value={taskCfg?.incremental_delay != null ? `${taskCfg.incremental_delay}ms` : undefined} />
+        <InfoRow label="Words to interrupt" value={taskCfg?.number_of_words_for_interruption} />
+        <InfoRow label="Backchanneling" value={<BoolBadge value={taskCfg?.backchanneling} />} />
+        <InfoRow label="Ambient noise" value={taskCfg?.ambient_noise ? (taskCfg.ambient_noise_track ?? 'On') : 'Off'} />
+        <InfoRow label="Voicemail" value={<BoolBadge value={taskCfg?.voicemail} />} />
+      </SectionCard>
+
+      {/* Telephony */}
+      {(task?.tools_config?.input?.provider || task?.tools_config?.output?.provider) && (
+        <SectionCard icon={<Phone className="h-4 w-4" />} title="Telephony">
+          <InfoRow label="Input provider" value={task.tools_config?.input?.provider} />
+          <InfoRow label="Output provider" value={task.tools_config?.output?.provider} />
+        </SectionCard>
+      )}
+
+      {/* Agent meta */}
+      <SectionCard icon={<Bot className="h-4 w-4" />} title="Agent Meta">
+        <InfoRow label="Agent Type" value={cfg.agent_type} />
+        <InfoRow label="Status" value={cfg.agent_status} />
+        <InfoRow label="Webhook URL" value={cfg.webhook_url ? <span className="font-mono text-xs break-all">{cfg.webhook_url}</span> : 'Not set'} />
+      </SectionCard>
+
+      {/* Raw JSON */}
+      <div className="md:col-span-2">
+        <Collapsible title="Raw Provider Config (JSON)">
+          <pre className="max-h-[24rem] overflow-auto text-xs leading-relaxed">
+            {JSON.stringify(cfg, null, 2)}
+          </pre>
+        </Collapsible>
+      </div>
+    </div>
+  );
+}
+
 // ── Calls tab ─────────────────────────────────────────────────────────────────
 
 interface AgentCallLog {
@@ -593,10 +749,29 @@ interface AgentCallLog {
   call_duration_in_seconds?: number;
   time_of_call?: string;
   recording_url?: string;
+  internal_recording_url?: string;
   sentiment_score?: string;
   call_cost?: number;
   call_direction?: string;
   [key: string]: unknown;
+}
+
+// Bolna execution shape (trimmed)
+interface BolnaExecLog {
+  id: string;
+  status: string;
+  conversation_time?: number;
+  total_cost?: number;
+  created_at: string;
+  telephony_data?: {
+    to_number?: string;
+    from_number?: string;
+    recording_url?: string;
+    duration?: number;
+    call_type?: string;
+    hangup_reason?: string;
+  };
+  extracted_data?: Record<string, unknown>;
 }
 
 const AGENT_CALL_STATUS: Record<string, { bg: string; text: string; dot: string }> = {
@@ -617,7 +792,7 @@ function parseAgentDate(raw?: string | null): string {
   } catch { return raw; }
 }
 
-function CallsTab({ agentId }: { agentId: string }) {
+function OmnidimCallsTab({ agentId }: { agentId: string }) {
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 10;
 
@@ -635,13 +810,7 @@ function CallsTab({ agentId }: { agentId: string }) {
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  if (isLoading) {
-    return (
-      <div className="flex h-40 items-center justify-center">
-        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
+  if (isLoading) return <div className="flex h-40 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
 
   if (!logs.length) {
     return (
@@ -673,6 +842,12 @@ function CallsTab({ agentId }: { agentId: string }) {
             const secs = log.call_duration_in_seconds ?? 0;
             const dur = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : secs ? `${secs}s` : '—';
             const isOutbound = (log.call_direction ?? '').toLowerCase() === 'outbound';
+            const recUrl = (() => {
+              const raw = log.internal_recording_url ?? log.recording_url ?? '';
+              if (typeof raw === 'string' && raw.startsWith('https://')) return raw;
+              if (typeof raw === 'string' && raw.startsWith('/')) return `https://www.omnidim.io${raw}`;
+              return raw ? String(raw) : '';
+            })();
 
             return (
               <div key={String(log.id ?? i)} className="flex items-center gap-4 px-4 py-3 hover:bg-muted/40 transition-colors">
@@ -684,12 +859,10 @@ function CallsTab({ agentId }: { agentId: string }) {
                     : <Phone className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
                   }
                 </div>
-
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-mono font-medium">{log.to_number ?? log.from_number ?? '—'}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">{parseAgentDate(log.time_of_call)}</p>
                 </div>
-
                 <div className="flex items-center gap-2 shrink-0">
                   {secs > 0 && <span className="text-xs text-muted-foreground">{dur}</span>}
                   {log.call_cost != null && (
@@ -699,15 +872,10 @@ function CallsTab({ agentId }: { agentId: string }) {
                     <span className={`h-1.5 w-1.5 rounded-full ${statusCfg.dot}`} />
                     {log.call_status ?? '—'}
                   </span>
-                  {log.recording_url && (
-                    <a
-                      href={String(log.recording_url)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 text-xs text-primary hover:underline"
-                    >
-                      <ExternalLink className="h-3 w-3" />
-                      Play
+                  {recUrl && (
+                    <a href={recUrl} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-xs text-primary hover:underline">
+                      <ExternalLink className="h-3 w-3" />Play
                     </a>
                   )}
                 </div>
@@ -726,6 +894,115 @@ function CallsTab({ agentId }: { agentId: string }) {
       )}
     </div>
   );
+}
+
+function BolnaCallsTab({ agentId }: { agentId: string }) {
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
+
+  const { data, isLoading, isFetching, refetch } = useQuery({
+    queryKey: ['agent-bolna-executions', agentId, page],
+    queryFn: async () => {
+      const res = await api.get('/calls/logs/bolna', {
+        params: { agentId, page, pageSize: PAGE_SIZE },
+      });
+      return res.data.data as { executions: BolnaExecLog[]; total: number; hasMore: boolean };
+    },
+  });
+
+  const executions = data?.executions ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  if (isLoading) return <div className="flex h-40 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+
+  if (!executions.length) {
+    return (
+      <div className="flex h-48 items-center justify-center rounded-xl border border-dashed">
+        <div className="text-center">
+          <Phone className="mx-auto h-10 w-10 text-muted-foreground/40 mb-3" />
+          <p className="text-sm font-medium">No executions yet</p>
+          <p className="mt-1 text-xs text-muted-foreground">Dispatch a call to see activity here.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">{total} execution{total !== 1 ? 's' : ''} total</p>
+        <Button variant="ghost" size="sm" onClick={() => refetch()} disabled={isFetching} className="gap-1.5">
+          <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
+          Refresh
+        </Button>
+      </div>
+
+      <div className="rounded-xl border overflow-hidden">
+        <div className="divide-y">
+          {executions.map((exec) => {
+            const statusKey = (exec.status ?? '').toLowerCase();
+            const statusCfg = AGENT_CALL_STATUS[statusKey] ?? { bg: 'bg-muted', text: 'text-muted-foreground', dot: 'bg-gray-400' };
+            const secs = exec.telephony_data?.duration ?? exec.conversation_time ?? 0;
+            const dur = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : secs ? `${secs}s` : '—';
+            const phone = exec.telephony_data?.to_number ?? exec.telephony_data?.from_number ?? '—';
+            const recUrl = exec.telephony_data?.recording_url ?? '';
+            const isOutbound = (exec.telephony_data?.call_type ?? '').toLowerCase() === 'outbound';
+
+            return (
+              <div key={exec.id} className="flex items-center gap-4 px-4 py-3 hover:bg-muted/40 transition-colors">
+                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+                  isOutbound ? 'bg-purple-50 dark:bg-purple-950/50' : 'bg-green-50 dark:bg-green-950/50'
+                }`}>
+                  {isOutbound
+                    ? <PhoneOff className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
+                    : <Phone className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
+                  }
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-mono font-medium">{phone}</p>
+                    <span className="rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 px-1.5 py-0.5 text-xs font-medium">Bolna</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">{new Date(exec.created_at).toLocaleString()}</p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {secs > 0 && <span className="text-xs text-muted-foreground">{dur}</span>}
+                  {exec.total_cost != null && (
+                    <span className="text-xs text-muted-foreground">${exec.total_cost.toFixed(4)}</span>
+                  )}
+                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${statusCfg.bg} ${statusCfg.text}`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${statusCfg.dot}`} />
+                    {exec.status}
+                  </span>
+                  {recUrl && (
+                    <a href={recUrl} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-xs text-primary hover:underline">
+                      <ExternalLink className="h-3 w-3" />Play
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>Previous</Button>
+          <span className="text-sm text-muted-foreground">Page {page} of {totalPages}</span>
+          <Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>Next</Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CallsTab({ agentId }: { agentId: string }) {
+  const { data: agent } = useAgent(agentId);
+  const isBolna = agent?.provider === 'BOLNA';
+  return isBolna ? <BolnaCallsTab agentId={agentId} /> : <OmnidimCallsTab agentId={agentId} />;
 }
 
 // ── Post-Call tab ──────────────────────────────────────────────────────────────
@@ -1137,7 +1414,10 @@ export default function AgentDetail() {
   }
 
   const providerColor = PROVIDER_COLORS[agent.provider] ?? 'bg-muted text-muted-foreground';
-  const cfg = agent.providerConfig as OmnidimConfig | null;
+  const rawPageCfg = agent.providerConfig as OmnidimConfig | BolnaConfig | null;
+  const cfg = isBolnaConfig(rawPageCfg) ? null : rawPageCfg as OmnidimConfig | null;
+  const bolnaPageCfg = isBolnaConfig(rawPageCfg) ? rawPageCfg : null;
+  const bolnaLLM = bolnaPageCfg?.tasks?.[0]?.tools_config?.llm_agent?.llm_config?.model;
 
   return (
     <div className="space-y-6">
@@ -1159,9 +1439,9 @@ export default function AgentDetail() {
                 <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${providerColor}`}>
                   {agent.provider}
                 </span>
-                {cfg?.llm_service && (
+                {(cfg?.llm_service ?? bolnaLLM) && (
                   <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground font-mono">
-                    {cfg.llm_service}
+                    {cfg?.llm_service ?? bolnaLLM}
                   </span>
                 )}
                 {agent.providerAgentId && (

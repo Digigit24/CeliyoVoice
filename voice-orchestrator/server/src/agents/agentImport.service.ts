@@ -4,6 +4,7 @@ import { OmnidimService } from '../providers/omnidim/omnidim.service';
 import { BolnaService } from '../providers/bolna/bolna.service';
 import { resolveCredentials } from '../providers/credentialResolver';
 import type { OmnidimFullAgent } from '../providers/omnidim/omnidim.types';
+import type { BolnaAgentV2 } from '../providers/bolna/bolna.types';
 import { logger } from '../utils/logger';
 
 export type ImportStatus = 'imported' | 'not_imported' | 'outdated';
@@ -100,6 +101,67 @@ function mapOmnidimToAgent(
     metadata: ({
       importedAt: new Date().toISOString(),
       importedFrom: 'omnidim',
+    } as unknown) as Prisma.InputJsonValue,
+  };
+}
+
+// ── Bolna mapper ──────────────────────────────────────────────────────────────
+
+/**
+ * Extract system prompt from Bolna agent prompts.
+ */
+function buildBolnaSystemPrompt(agent: BolnaAgentV2): string {
+  return agent.agent_prompts?.task_1?.system_prompt ?? '';
+}
+
+/**
+ * Derive language from Bolna transcriber config.
+ */
+function deriveBolnaLanguage(agent: BolnaAgentV2): string {
+  const task = agent.tasks?.[0];
+  return task?.tools_config?.transcriber?.language ?? 'en';
+}
+
+/**
+ * Derive voice model from Bolna synthesizer config.
+ */
+function deriveBolnaVoiceModel(agent: BolnaAgentV2): string {
+  const task = agent.tasks?.[0];
+  const synth = task?.tools_config?.synthesizer;
+  return synth?.provider_config?.voice ?? synth?.provider_config?.voice_id ?? synth?.voice ?? 'default';
+}
+
+/**
+ * Maps a BolnaAgentV2 to the Prisma Agent create/update data shape.
+ */
+function mapBolnaToAgent(
+  bolnaAgent: BolnaAgentV2,
+  tenantId: string,
+  ownerUserId: string,
+) {
+  const systemPrompt = buildBolnaSystemPrompt(bolnaAgent);
+  const voiceLanguage = deriveBolnaLanguage(bolnaAgent);
+  const voiceModel = deriveBolnaVoiceModel(bolnaAgent);
+  const task = bolnaAgent.tasks?.[0];
+  const llmModel = task?.tools_config?.llm_agent?.llm_config?.model ?? '';
+
+  return {
+    tenantId,
+    ownerUserId,
+    name: bolnaAgent.agent_name,
+    provider: 'BOLNA' as const,
+    providerAgentId: bolnaAgent.id,
+    voiceLanguage,
+    voiceModel: voiceModel || llmModel || 'default',
+    systemPrompt: systemPrompt || bolnaAgent.agent_name,
+    isActive: bolnaAgent.agent_status === 'processed' || bolnaAgent.agent_status === 'active',
+    providerConfig: bolnaAgent as unknown as Prisma.InputJsonValue,
+    welcomeMessage: bolnaAgent.agent_welcome_message ?? null,
+    callType: bolnaAgent.agent_type ?? 'outbound',
+    tools: [] as Prisma.InputJsonValue,
+    metadata: ({
+      importedAt: new Date().toISOString(),
+      importedFrom: 'bolna',
     } as unknown) as Prisma.InputJsonValue,
   };
 }
@@ -280,6 +342,87 @@ export class AgentImportService {
     });
   }
 
+  // ── Bolna import ────────────────────────────────────────────────────────────
+
+  /**
+   * Import a single Bolna agent by its provider ID.
+   */
+  async importFromBolna(
+    tenantId: string,
+    ownerUserId: string,
+    bolnaAgentId: string,
+  ): Promise<{ agent: Agent; action: 'created' | 'updated' }> {
+    const creds = await resolveCredentials(tenantId, 'BOLNA', this.prisma);
+    const svc = new BolnaService(creds.apiKey, creds.apiUrl);
+
+    logger.debug({ tenantId, bolnaAgentId }, 'importFromBolna: fetching agent');
+    const bolnaAgent = await svc.getAgent(bolnaAgentId);
+
+    const data = mapBolnaToAgent(bolnaAgent, tenantId, ownerUserId);
+
+    const existing = await this.prisma.agent.findFirst({
+      where: { tenantId, providerAgentId: bolnaAgentId },
+    });
+
+    if (existing) {
+      const updated = await this.prisma.agent.update({
+        where: { id: existing.id },
+        data: {
+          name: data.name,
+          voiceLanguage: data.voiceLanguage,
+          voiceModel: data.voiceModel,
+          systemPrompt: data.systemPrompt,
+          isActive: data.isActive,
+          providerConfig: data.providerConfig,
+          welcomeMessage: data.welcomeMessage,
+          callType: data.callType,
+          metadata: data.metadata,
+        },
+      });
+      logger.info({ tenantId, agentId: updated.id, bolnaAgentId }, 'importFromBolna: updated');
+      return { agent: updated, action: 'updated' };
+    }
+
+    const created = await this.prisma.agent.create({ data });
+    logger.info({ tenantId, agentId: created.id, bolnaAgentId }, 'importFromBolna: created');
+    return { agent: created, action: 'created' };
+  }
+
+  /**
+   * Import all agents from Bolna for a tenant.
+   */
+  async importAllFromBolna(
+    tenantId: string,
+    ownerUserId: string,
+  ): Promise<ImportResult> {
+    const creds = await resolveCredentials(tenantId, 'BOLNA', this.prisma);
+    const svc = new BolnaService(creds.apiKey, creds.apiUrl);
+
+    const allAgents = await svc.listAgents();
+    logger.info({ tenantId, total: allAgents.length }, 'importAllFromBolna: starting batch import');
+
+    const result: ImportResult = { imported: 0, updated: 0, failed: [] };
+
+    for (let i = 0; i < allAgents.length; i++) {
+      const remoteAgent = allAgents[i];
+      try {
+        if (i > 0) await new Promise((resolve) => setTimeout(resolve, 100));
+        const { action } = await this.importFromBolna(tenantId, ownerUserId, remoteAgent.id);
+        if (action === 'created') result.imported++;
+        else result.updated++;
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        logger.warn({ tenantId, agentId: remoteAgent.id, err }, 'importAllFromBolna: failed to import agent');
+        result.failed.push({ id: remoteAgent.id, error: errorMsg });
+      }
+    }
+
+    logger.info({ tenantId, ...result }, 'importAllFromBolna: batch complete');
+    return result;
+  }
+
+  // ── Sync ─────────────────────────────────────────────────────────────────────
+
   /**
    * Re-sync an existing local agent from its provider.
    */
@@ -293,6 +436,15 @@ export class AgentImportService {
 
     if (existing.provider === 'OMNIDIM') {
       const { agent } = await this.importFromOmnidim(
+        tenantId,
+        existing.ownerUserId,
+        existing.providerAgentId,
+      );
+      return agent;
+    }
+
+    if (existing.provider === 'BOLNA') {
+      const { agent } = await this.importFromBolna(
         tenantId,
         existing.ownerUserId,
         existing.providerAgentId,

@@ -9,6 +9,8 @@ import {
   importSingleOmnidim,
   importAllOmnidim,
   listRemoteOmnidim,
+  importSingleBolna,
+  importAllBolna,
   listRemoteBolna,
   syncAgent,
 } from '../../agents/agent.controller';
@@ -26,6 +28,8 @@ export const agentRouter = Router();
 // ── Import routes (MUST come before /:id to avoid "import" being treated as an id) ──
 agentRouter.post('/import/omnidim', requirePermission('voiceai.agents.create'), importSingleOmnidim);
 agentRouter.post('/import/omnidim/all', requirePermission('voiceai.agents.create'), importAllOmnidim);
+agentRouter.post('/import/bolna', requirePermission('voiceai.agents.create'), importSingleBolna);
+agentRouter.post('/import/bolna/all', requirePermission('voiceai.agents.create'), importAllBolna);
 
 // ── Remote listing routes ─────────────────────────────────────────────────────
 agentRouter.get('/remote/omnidim', requirePermission('voiceai.agents.view'), listRemoteOmnidim);
