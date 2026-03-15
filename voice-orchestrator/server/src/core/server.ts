@@ -1,3 +1,4 @@
+import 'express-async-errors'; // must be first — patches Express to catch async handler errors
 import express, { type Application } from 'express';
 import cors from 'cors';
 import { config } from './config';

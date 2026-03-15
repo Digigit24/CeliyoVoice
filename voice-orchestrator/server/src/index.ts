@@ -66,7 +66,10 @@ async function bootstrap(): Promise<void> {
   });
 
   process.on('unhandledRejection', (reason) => {
-    logger.fatal({ reason }, 'Unhandled promise rejection — shutting down');
+    const err = reason instanceof Error
+      ? { message: reason.message, stack: reason.stack, name: reason.name }
+      : reason;
+    logger.fatal({ err }, 'Unhandled promise rejection — shutting down');
     void shutdown('unhandledRejection');
   });
 }
