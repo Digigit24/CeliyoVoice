@@ -199,7 +199,11 @@ export class AgentImportService {
     if (provider === 'OMNIDIM') {
       const svc = new OmnidimService(creds.apiKey, creds.apiUrl);
       const resp = await svc.listAgents(1, 100);
-      remoteAgents = (resp.bots ?? []).map((a) => ({
+      const bots = resp.bots ?? [];
+      if (bots.length > 0) {
+        logger.info({ firstBotKeys: Object.keys(bots[0] as object), firstBot: bots[0] }, 'listRemoteAgents: sample bot structure from Omnidim');
+      }
+      remoteAgents = bots.map((a) => ({
         id: a.id,
         name: a.name,
         call_type: a.call_type,

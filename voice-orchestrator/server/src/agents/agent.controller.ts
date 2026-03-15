@@ -98,8 +98,10 @@ export const deleteAgent: RequestHandler<IdParam> = async (req, res) => {
 
 /** POST /api/v1/agents/import/omnidim */
 export const importSingleOmnidim: RequestHandler = async (req, res) => {
+  logger.info({ body: req.body }, 'importSingleOmnidim: received request body');
   const parsed = ImportSingleSchema.safeParse(req.body);
   if (!parsed.success) {
+    logger.warn({ validationErrors: parsed.error.flatten() }, 'importSingleOmnidim: validation failed');
     return errorResponse(res, 'Validation failed', 'VALIDATION_ERROR', 400, parsed.error.flatten());
   }
 
