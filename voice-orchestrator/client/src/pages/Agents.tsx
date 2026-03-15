@@ -1,13 +1,11 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Loader2, Bot, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Loader2, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
-import { Card, CardContent } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -16,88 +14,59 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { AgentCard } from '@/components/agents/AgentCard';
+import { ImportAgentsDialog } from '@/components/agents/ImportAgentsDialog';
 import { api } from '@/lib/axios';
 import { toast } from '@/hooks/useToast';
-
-interface Agent {
-  id: string;
-  name: string;
-  provider: string;
-  isActive: boolean;
-  systemPrompt: string;
-  voiceId?: string;
-  voiceLanguage: string;
-  createdAt: string;
-}
+import type { AgentCardData } from '@/components/agents/AgentCard';
 
 interface AgentsResponse {
   success: boolean;
-  data: Agent[];
-  meta: { total: number; page: number; limit: number };
+  data: AgentCardData[];
+  pagination: { total: number; page: number; limit: number };
 }
 
-const emptyForm = { name: '', provider: 'OMNIDIM', systemPrompt: '', voiceId: '', voiceLanguage: 'en', isActive: true };
+const emptyForm = {
+  name: '',
+  provider: 'OMNIDIM',
+  systemPrompt: '',
+  voiceModel: 'female',
+  voiceLanguage: 'en',
+  isActive: true,
+};
 
 export default function Agents() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editAgent, setEditAgent] = useState<Agent | null>(null);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
 
   const { data, isLoading } = useQuery<AgentsResponse>({
     queryKey: ['agents', search],
-    queryFn: () => api.get('/agents', { params: { search: search || undefined, limit: 50 } }).then((r) => r.data),
+    queryFn: () =>
+      api
+        .get('/agents', { params: { search: search || undefined, limit: 50 } })
+        .then((r) => r.data),
   });
 
   const createMutation = useMutation({
     mutationFn: (payload: typeof emptyForm) => api.post('/agents', payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agents'] });
-      setDialogOpen(false);
+      setCreateDialogOpen(false);
+      setForm(emptyForm);
       toast({ title: 'Agent created' });
     },
     onError: () => toast({ variant: 'destructive', title: 'Failed to create agent' }),
   });
 
-  const updateMutation = useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: typeof emptyForm }) =>
-      api.put(`/agents/${id}`, payload),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['agents'] });
-      setDialogOpen(false);
-      toast({ title: 'Agent updated' });
-    },
-    onError: () => toast({ variant: 'destructive', title: 'Failed to update agent' }),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/agents/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['agents'] });
-      toast({ title: 'Agent deleted' });
-    },
-    onError: () => toast({ variant: 'destructive', title: 'Failed to delete agent' }),
-  });
-
-  const openCreate = () => {
-    setEditAgent(null);
-    setForm(emptyForm);
-    setDialogOpen(true);
-  };
-
-  const openEdit = (agent: Agent) => {
-    setEditAgent(agent);
-    setForm({ name: agent.name, provider: agent.provider, systemPrompt: agent.systemPrompt, voiceId: agent.voiceId ?? '', voiceLanguage: agent.voiceLanguage, isActive: agent.isActive });
-    setDialogOpen(true);
-  };
-
   const handleSubmit = () => {
-    if (editAgent) updateMutation.mutate({ id: editAgent.id, payload: form });
-    else createMutation.mutate(form);
+    if (!form.name || !form.systemPrompt) return;
+    createMutation.mutate(form);
   };
 
-  const isPending = createMutation.isPending || updateMutation.isPending;
+  const agents = data?.data ?? [];
 
   return (
     <div className="space-y-6">
@@ -106,10 +75,16 @@ export default function Agents() {
           <h1 className="text-2xl font-bold">Agents</h1>
           <p className="text-sm text-muted-foreground">Manage your Voice AI agents</p>
         </div>
-        <Button onClick={openCreate}>
-          <Plus className="h-4 w-4" />
-          New Agent
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setImportDialogOpen(true)}>
+            <Download className="h-4 w-4" />
+            Import Agents
+          </Button>
+          <Button onClick={() => setCreateDialogOpen(true)}>
+            <Plus className="h-4 w-4" />
+            New Agent
+          </Button>
+        </div>
       </div>
 
       <div className="flex gap-3">
@@ -127,65 +102,48 @@ export default function Agents() {
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {(data?.data ?? []).map((agent) => (
-            <Card key={agent.id}>
-              <CardContent className="pt-4">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
-                      <Bot className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <p className="font-medium leading-none">{agent.name}</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">{agent.voiceLanguage} · {agent.provider}</p>
-                    </div>
-                  </div>
-                  <Badge variant={agent.isActive ? 'success' : 'secondary'}>
-                    {agent.isActive ? 'Active' : 'Inactive'}
-                  </Badge>
-                </div>
-                <p className="mt-3 line-clamp-2 text-xs text-muted-foreground">{agent.systemPrompt || 'No system prompt set'}</p>
-                <div className="mt-3 flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => openEdit(agent)}>
-                    <Pencil className="h-3.5 w-3.5" />
-                    Edit
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-destructive hover:text-destructive"
-                    onClick={() => deleteMutation.mutate(agent.id)}
-                    disabled={deleteMutation.isPending}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    Delete
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+          {agents.map((agent) => (
+            <AgentCard key={agent.id} agent={agent} />
           ))}
-          {(data?.data ?? []).length === 0 && (
-            <div className="col-span-full flex h-40 items-center justify-center">
+          {agents.length === 0 && (
+            <div className="col-span-full flex h-40 flex-col items-center justify-center gap-3">
               <p className="text-sm text-muted-foreground">No agents found.</p>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => setImportDialogOpen(true)}>
+                  <Download className="mr-1 h-3.5 w-3.5" />
+                  Import from Provider
+                </Button>
+                <Button size="sm" onClick={() => setCreateDialogOpen(true)}>
+                  <Plus className="mr-1 h-3.5 w-3.5" />
+                  Create Agent
+                </Button>
+              </div>
             </div>
           )}
         </div>
       )}
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      {/* Create Agent Dialog */}
+      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{editAgent ? 'Edit Agent' : 'Create Agent'}</DialogTitle>
+            <DialogTitle>Create Agent</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Name</Label>
-              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="My Voice Agent" />
+              <Input
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="My Voice Agent"
+              />
             </div>
             <div className="space-y-2">
               <Label>Provider</Label>
               <Select value={form.provider} onValueChange={(v) => setForm({ ...form, provider: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="OMNIDIM">Omnidim</SelectItem>
                   <SelectItem value="BOLNA">Bolna</SelectItem>
@@ -194,8 +152,13 @@ export default function Agents() {
             </div>
             <div className="space-y-2">
               <Label>Language</Label>
-              <Select value={form.voiceLanguage} onValueChange={(v) => setForm({ ...form, voiceLanguage: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Select
+                value={form.voiceLanguage}
+                onValueChange={(v) => setForm({ ...form, voiceLanguage: v })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="en">English</SelectItem>
                   <SelectItem value="hi">Hindi</SelectItem>
@@ -203,10 +166,6 @@ export default function Agents() {
                   <SelectItem value="fr">French</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Voice ID</Label>
-              <Input value={form.voiceId} onChange={(e) => setForm({ ...form, voiceId: e.target.value })} placeholder="Provider voice ID (optional)" />
             </div>
             <div className="space-y-2">
               <Label>System Prompt</Label>
@@ -219,17 +178,38 @@ export default function Agents() {
             </div>
             <div className="flex items-center justify-between">
               <Label>Active</Label>
-              <Switch checked={form.isActive} onCheckedChange={(v) => setForm({ ...form, isActive: v })} />
+              <Switch
+                checked={form.isActive}
+                onCheckedChange={(v) => setForm({ ...form, isActive: v })}
+              />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleSubmit} disabled={isPending || !form.name}>
-              {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : editAgent ? 'Save' : 'Create'}
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCreateDialogOpen(false);
+                setForm(emptyForm);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={createMutation.isPending || !form.name || !form.systemPrompt}
+            >
+              {createMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                'Create'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Import Agents Dialog */}
+      <ImportAgentsDialog open={importDialogOpen} onOpenChange={setImportDialogOpen} />
     </div>
   );
 }

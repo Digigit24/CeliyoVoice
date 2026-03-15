@@ -121,11 +121,18 @@ model Agent {
   maxConcurrentCalls Int           @default(1)
   isActive           Boolean       @default(true)
   metadata           Json?
+  /// Full provider-specific config stored as JSON (e.g. full Omnidim agent response).
+  providerConfig     Json?         @map("provider_config")
+  /// Welcome message spoken at the start of a call.
+  welcomeMessage     String?       @map("welcome_message") @db.Text
+  /// Call direction type: Incoming or Outgoing.
+  callType           String?       @default("Incoming") @map("call_type")
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
   calls Call[]
 
+  @@unique([tenantId, providerAgentId])
   @@index([tenantId])
   @@map("agents")
 }

@@ -86,3 +86,122 @@ export interface OmnidimErrorResponse {
   message: string;
   code?: string;
 }
+
+// ── Full agent config types (for import/detail view) ─────────────────────────
+
+export interface OmnidimContextBreakdown {
+  title: string;
+  body: string;
+  is_enabled?: boolean;
+}
+
+export interface OmnidimTranscriberConfig {
+  provider: string;
+  silence_timeout_ms?: number;
+  language?: string;
+}
+
+export interface OmnidimModelConfig {
+  model: string;
+  temperature?: number;
+  max_tokens?: number;
+}
+
+export interface OmnidimVoiceConfig {
+  provider: string;
+  voice_id: string;
+  speed?: number;
+}
+
+export interface OmnidimWebSearchConfig {
+  enabled: boolean;
+  provider?: string;
+}
+
+export interface OmnidimPostCallEmailAction {
+  enabled: boolean;
+  recipients?: string[];
+  subject?: string;
+}
+
+export interface OmnidimPostCallWebhookAction {
+  enabled: boolean;
+  url?: string;
+  headers?: Record<string, string>;
+}
+
+export interface OmnidimPostCallActions {
+  email?: OmnidimPostCallEmailAction;
+  webhook?: OmnidimPostCallWebhookAction;
+}
+
+export interface OmnidimFillerConfig {
+  enabled: boolean;
+  after_sec?: number;
+  fillers?: string[];
+}
+
+export interface OmnidimBackgroundTrackConfig {
+  enabled: boolean;
+  track_url?: string;
+  volume?: number;
+}
+
+export interface OmnidimVoicemailConfig {
+  enabled: boolean;
+  detection_provider?: string;
+  message?: string;
+}
+
+export interface OmnidimTransferOption {
+  number: string;
+  backup_numbers?: string[];
+  transfer_condition?: string;
+  transfer_message?: string;
+}
+
+export interface OmnidimTransferConfig {
+  enabled: boolean;
+  transfer_options?: OmnidimTransferOption[];
+}
+
+export interface OmnidimEndCallConfig {
+  enabled: boolean;
+  condition?: string;
+  message?: string;
+}
+
+/** Full agent response from GET /agents/{agent_id} — richer than the list response */
+export interface OmnidimFullAgent {
+  id: string;
+  name: string;
+  welcome_message?: string;
+  context_breakdown?: OmnidimContextBreakdown[];
+  transcriber?: OmnidimTranscriberConfig;
+  model?: OmnidimModelConfig;
+  voice?: OmnidimVoiceConfig;
+  web_search?: OmnidimWebSearchConfig;
+  post_call_actions?: OmnidimPostCallActions;
+  filler?: OmnidimFillerConfig;
+  background_track?: OmnidimBackgroundTrackConfig;
+  voicemail?: OmnidimVoicemailConfig;
+  languages?: string[];
+  transfer?: OmnidimTransferConfig;
+  end_call?: OmnidimEndCallConfig;
+  call_type?: string;
+  is_active?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/** Paginated list response from GET /agents */
+export interface OmnidimAgentListResponse {
+  agents: OmnidimFullAgent[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages?: number;
+}
+
+/** Payload for creating a full agent via POST /agents/create */
+export type OmnidimCreateAgentPayload = Omit<OmnidimFullAgent, 'id' | 'created_at' | 'updated_at'>;

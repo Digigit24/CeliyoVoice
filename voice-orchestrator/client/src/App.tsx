@@ -7,6 +7,7 @@ import { useAuthStore } from './store/authStore';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Agents from './pages/Agents';
+import AgentDetail from './pages/AgentDetail';
 import Calls from './pages/Calls';
 import Tools from './pages/Tools';
 import Settings from './pages/Settings';
@@ -38,6 +39,7 @@ export default function App() {
             >
               <Route path="/" element={<Dashboard />} />
               <Route path="/agents" element={<Agents />} />
+              <Route path="/agents/:id" element={<AgentDetail />} />
               <Route path="/calls" element={<Calls />} />
               <Route path="/tools" element={<Tools />} />
               <Route path="/settings" element={<Settings />} />

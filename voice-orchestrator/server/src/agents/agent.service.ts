@@ -113,6 +113,34 @@ export class AgentService {
     }) as Promise<AgentWithCallCount | null>;
   }
 
+  async getAgentWithStats(id: string, tenantId: string): Promise<(AgentWithCallCount & { lastCallAt?: Date | null; successfulCalls?: number; avgDuration?: number | null }) | null> {
+    const agent = await this.prisma.agent.findFirst({
+      where: { id, tenantId },
+      include: { _count: { select: { calls: true } } },
+    });
+    if (!agent) return null;
+
+    const [lastCall, successCount, avgAgg] = await Promise.all([
+      this.prisma.call.findFirst({
+        where: { agentId: id, tenantId },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      }),
+      this.prisma.call.count({ where: { agentId: id, tenantId, status: 'COMPLETED' } }),
+      this.prisma.call.aggregate({
+        where: { agentId: id, tenantId, status: 'COMPLETED', duration: { not: null } },
+        _avg: { duration: true },
+      }),
+    ]);
+
+    return {
+      ...(agent as AgentWithCallCount),
+      lastCallAt: lastCall?.createdAt ?? null,
+      successfulCalls: successCount,
+      avgDuration: avgAgg._avg.duration,
+    };
+  }
+
   async update(
     id: string,
     tenantId: string,

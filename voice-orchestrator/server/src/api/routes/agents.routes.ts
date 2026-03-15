@@ -6,12 +6,29 @@ import {
   getAgent,
   updateAgent,
   deleteAgent,
+  importSingleOmnidim,
+  importAllOmnidim,
+  listRemoteOmnidim,
+  listRemoteBolna,
+  syncAgent,
 } from '../../agents/agent.controller';
 
 export const agentRouter = Router();
 
+// ── Import routes (MUST come before /:id to avoid "import" being treated as an id) ──
+agentRouter.post('/import/omnidim', requirePermission('voiceai.agents.create'), importSingleOmnidim);
+agentRouter.post('/import/omnidim/all', requirePermission('voiceai.agents.create'), importAllOmnidim);
+
+// ── Remote listing routes ─────────────────────────────────────────────────────
+agentRouter.get('/remote/omnidim', requirePermission('voiceai.agents.view'), listRemoteOmnidim);
+agentRouter.get('/remote/bolna', requirePermission('voiceai.agents.view'), listRemoteBolna);
+
+// ── Standard CRUD routes ──────────────────────────────────────────────────────
 agentRouter.post('/', requirePermission('voiceai.agents.create'), createAgent);
 agentRouter.get('/', requirePermission('voiceai.agents.view'), listAgents);
 agentRouter.get('/:id', requirePermission('voiceai.agents.view'), getAgent);
 agentRouter.put('/:id', requirePermission('voiceai.agents.edit'), updateAgent);
 agentRouter.delete('/:id', requirePermission('voiceai.agents.delete'), deleteAgent);
+
+// ── Sync route ────────────────────────────────────────────────────────────────
+agentRouter.post('/:id/sync', requirePermission('voiceai.agents.edit'), syncAgent);
