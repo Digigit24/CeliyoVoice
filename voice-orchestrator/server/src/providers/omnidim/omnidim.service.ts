@@ -30,16 +30,23 @@ export class ProviderApiError extends Error {
 
 /**
  * Direct HTTP client for the Omnidim REST API.
- * Wraps all calls with error handling, logging, and typed responses.
- * Base URL: https://backend.omnidim.io/api/v1
+ * All outbound requests and responses are logged at INFO level so they show
+ * up in normal dev/prod log output — no debug-level filtering needed.
  */
 export class OmnidimService {
   private readonly http: AxiosInstance;
+  private readonly baseURL: string;
 
   constructor(apiKey: string, apiUrl: string) {
-    const baseURL = apiUrl.replace(/\/$/, '');
+    this.baseURL = apiUrl.replace(/\/$/, '');
+
+    logger.info(
+      { provider: 'OMNIDIM', baseURL: this.baseURL, keyPrefix: apiKey.slice(0, 8) + '...' },
+      'OmnidimService: initialised with credentials',
+    );
+
     this.http = axios.create({
-      baseURL,
+      baseURL: this.baseURL,
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
@@ -47,6 +54,62 @@ export class OmnidimService {
       },
       timeout: 30_000,
     });
+
+    // ── Request interceptor — log every outbound call ──────────────────────
+    this.http.interceptors.request.use((config) => {
+      const fullUrl = `${config.baseURL ?? ''}${config.url ?? ''}`;
+      logger.info(
+        {
+          provider: 'OMNIDIM',
+          outbound: true,
+          method: config.method?.toUpperCase(),
+          url: fullUrl,
+          params: config.params as unknown,
+          bodyKeys: config.data ? Object.keys(config.data as object) : undefined,
+        },
+        'OMNIDIM → request',
+      );
+      return config;
+    });
+
+    // ── Response interceptor — log every response ──────────────────────────
+    this.http.interceptors.response.use(
+      (response) => {
+        const fullUrl = `${response.config.baseURL ?? ''}${response.config.url ?? ''}`;
+        logger.info(
+          {
+            provider: 'OMNIDIM',
+            inbound: true,
+            method: response.config.method?.toUpperCase(),
+            url: fullUrl,
+            status: response.status,
+            dataKeys: response.data && typeof response.data === 'object'
+              ? Object.keys(response.data as object).slice(0, 10)
+              : undefined,
+          },
+          'OMNIDIM ← response',
+        );
+        return response;
+      },
+      (err: unknown) => {
+        if (isAxiosError(err)) {
+          const fullUrl = `${err.config?.baseURL ?? ''}${err.config?.url ?? ''}`;
+          logger.error(
+            {
+              provider: 'OMNIDIM',
+              inbound: true,
+              method: err.config?.method?.toUpperCase(),
+              url: fullUrl,
+              status: err.response?.status,
+              responseBody: err.response?.data,
+              axiosMessage: err.message,
+            },
+            'OMNIDIM ← error response',
+          );
+        }
+        return Promise.reject(err);
+      },
+    );
   }
 
   private handleError(err: unknown, context: string): never {
@@ -57,89 +120,68 @@ export class OmnidimService {
         (err.response?.data as { message?: string; error?: string })?.error ??
         err.message;
 
-      logger.debug({ status, message, context }, 'Omnidim API error');
-
       if (status === 401) {
         throw new ProviderAuthError('Omnidim');
       }
       throw new ProviderApiError(status >= 400 && status < 600 ? status : 502, message);
     }
-    throw err;
+    // Network errors (ENOTFOUND, ECONNREFUSED, etc.) — wrap with URL context
+    const networkMessage = err instanceof Error ? err.message : String(err);
+    throw new ProviderApiError(
+      502,
+      `${networkMessage} [baseURL: ${this.baseURL}, context: ${context}]`,
+    );
   }
 
-  /**
-   * GET /api/v1/agents
-   * Returns a paginated list of agents from Omnidim.
-   */
+  /** GET /agents — paginated list */
   async listAgents(page = 1, pageSize = 50): Promise<OmnidimAgentListResponse> {
     try {
-      logger.debug({ page, pageSize }, 'Omnidim: listAgents');
       const { data } = await this.http.get<OmnidimAgentListResponse>('/agents', {
         params: { pageno: page, pagesize: pageSize },
       });
-      logger.debug({ count: data.agents?.length ?? 0 }, 'Omnidim: listAgents response');
       return data;
     } catch (err) {
       this.handleError(err, 'listAgents');
     }
   }
 
-  /**
-   * GET /api/v1/agents/{agent_id}
-   * Returns the full agent configuration including all nested configs.
-   */
+  /** GET /agents/{agent_id} — full config */
   async getAgent(agentId: string): Promise<OmnidimFullAgent> {
     try {
-      logger.debug({ agentId }, 'Omnidim: getAgent');
       const { data } = await this.http.get<OmnidimFullAgent>(`/agents/${agentId}`);
-      logger.debug({ agentId, name: data.name }, 'Omnidim: getAgent response');
       return data;
     } catch (err) {
       this.handleError(err, 'getAgent');
     }
   }
 
-  /**
-   * POST /api/v1/agents/create
-   * Creates a new agent on Omnidim.
-   */
+  /** POST /agents/create */
   async createAgent(payload: OmnidimCreateAgentPayload): Promise<OmnidimFullAgent> {
     try {
-      logger.debug({ name: payload.name }, 'Omnidim: createAgent');
       const { data } = await this.http.post<OmnidimFullAgent>('/agents/create', payload);
-      logger.debug({ agentId: data.id }, 'Omnidim: createAgent response');
       return data;
     } catch (err) {
       this.handleError(err, 'createAgent');
     }
   }
 
-  /**
-   * PUT /api/v1/agents/{agent_id}
-   * Partial update of an existing agent.
-   */
+  /** PUT /agents/{agent_id} */
   async updateAgent(
     agentId: string,
     payload: Partial<OmnidimCreateAgentPayload>,
   ): Promise<OmnidimFullAgent> {
     try {
-      logger.debug({ agentId }, 'Omnidim: updateAgent');
       const { data } = await this.http.put<OmnidimFullAgent>(`/agents/${agentId}`, payload);
-      logger.debug({ agentId }, 'Omnidim: updateAgent response');
       return data;
     } catch (err) {
       this.handleError(err, 'updateAgent');
     }
   }
 
-  /**
-   * DELETE /api/v1/agents/{agent_id}
-   */
+  /** DELETE /agents/{agent_id} */
   async deleteAgent(agentId: string): Promise<void> {
     try {
-      logger.debug({ agentId }, 'Omnidim: deleteAgent');
       await this.http.delete(`/agents/${agentId}`);
-      logger.debug({ agentId }, 'Omnidim: deleteAgent done');
     } catch (err) {
       this.handleError(err, 'deleteAgent');
     }
