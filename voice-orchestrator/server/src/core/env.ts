@@ -18,7 +18,7 @@ const envSchema = z.object({
   SUPERADMIN_URL: z.string().url().default('https://admin.celiyo.com'),
 
   // Voice provider defaults (used if tenant has no custom credentials)
-  OMNIDIM_API_URL: z.string().url().default('https://api.omnidim.com'),
+  OMNIDIM_API_URL: z.string().url().default('https://backend.omnidim.io/api/v1'),
   OMNIDIM_API_KEY: z.string().min(1).default(''),
   // Bolna is optional — the adapter is a stub (Phase 2)
   BOLNA_API_URL: z.string().url().default('https://api.bolna.ai'),

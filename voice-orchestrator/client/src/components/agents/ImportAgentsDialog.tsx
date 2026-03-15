@@ -43,8 +43,8 @@ function ImportStatusBadge({ status }: { status: RemoteAgent['importStatus'] }) 
   );
 }
 
-function OmnidimTab() {
-  const { data: agents, isLoading, error, refetch } = useRemoteAgents('omnidim');
+function OmnidimTab({ isActive }: { isActive: boolean }) {
+  const { data: agents, isLoading, error, refetch } = useRemoteAgents('omnidim', isActive);
   const importMutation = useImportAgent();
   const importAllMutation = useImportAllAgents();
   const [importingId, setImportingId] = useState<string | null>(null);
@@ -237,7 +237,7 @@ export function ImportAgentsDialog({ open, onOpenChange }: ImportAgentsDialogPro
         </div>
 
         <div className="min-h-[12rem]">
-          {activeTab === 'omnidim' ? <OmnidimTab /> : <BolnaTab />}
+          {activeTab === 'omnidim' ? <OmnidimTab isActive={open} /> : <BolnaTab />}
         </div>
 
         <DialogFooter>
