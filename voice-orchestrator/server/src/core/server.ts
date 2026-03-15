@@ -5,6 +5,7 @@ import { requestIdMiddleware } from '../api/middleware/requestId';
 import { httpLogger } from '../utils/logger';
 import { globalErrorHandler } from '../api/middleware/errorHandler';
 import { apiRouter } from '../api/routes/index';
+import { webhookRouter } from '../api/routes/webhooks.routes';
 import { jwtMiddleware } from '../common/jwtMiddleware';
 
 export function createApp(): Application {
@@ -28,7 +29,7 @@ export function createApp(): Application {
   );
 
   // ── Body parsing ───────────────────────────────────────────────────────────
-  app.use(express.json({ limit: '1mb' }));
+  app.use(express.json({ limit: '2mb' }));
   app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
   // ── Request tracing ────────────────────────────────────────────────────────
@@ -45,6 +46,10 @@ export function createApp(): Application {
       version: process.env['npm_package_version'] ?? '1.0.0',
     });
   });
+
+  // ── Webhook endpoints (public — registered before JWT middleware) ──────────
+  // Signature verification is handled inside webhook.service.ts
+  app.use('/webhooks', webhookRouter);
 
   // ── JWT authentication (skips public paths internally) ────────────────────
   app.use(jwtMiddleware);

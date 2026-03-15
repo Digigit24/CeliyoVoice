@@ -4,6 +4,10 @@ import { logger } from './utils/logger';
 import { defaultPrismaClient } from './db/client';
 import { disconnectAllTenantClients } from './db/tenantClients';
 import { disconnectRedis } from './db/redis';
+import { startAllWorkers, stopAllWorkers } from './queue/index';
+import { initCallEventHandlers } from './events/handlers/callEvent.handler';
+import { initToolEventHandlers } from './events/handlers/toolEvent.handler';
+import { disconnectEventBus } from './events/eventBus';
 
 async function bootstrap(): Promise<void> {
   const app = createApp();
@@ -12,13 +16,16 @@ async function bootstrap(): Promise<void> {
   await defaultPrismaClient.$connect();
   logger.info('Default database connected');
 
+  // Initialize event handlers (subscribe before workers produce events)
+  initCallEventHandlers();
+  initToolEventHandlers();
+
+  // Start BullMQ workers
+  startAllWorkers();
+
   const server = app.listen(config.port, () => {
     logger.info(
-      {
-        port: config.port,
-        env: config.env,
-        module: config.module.name,
-      },
+      { port: config.port, env: config.env, module: config.module.name },
       `Voice Orchestrator listening on port ${config.port}`,
     );
   });
@@ -31,6 +38,8 @@ async function bootstrap(): Promise<void> {
       logger.info('HTTP server closed');
 
       try {
+        await stopAllWorkers();
+        await disconnectEventBus();
         await disconnectAllTenantClients();
         await defaultPrismaClient.$disconnect();
         await disconnectRedis();
@@ -42,7 +51,6 @@ async function bootstrap(): Promise<void> {
       }
     });
 
-    // Force exit after 10 seconds if graceful shutdown hangs
     setTimeout(() => {
       logger.error('Graceful shutdown timed out — forcing exit');
       process.exit(1);

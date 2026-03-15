@@ -7,6 +7,8 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ── Enums ────────────────────────────────────────────────────────────────────
+
 enum TenantPlan {
   FREE
   STARTER
@@ -19,14 +21,64 @@ enum VoiceProvider {
   BOLNA
 }
 
+enum CallDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum CallStatus {
+  QUEUED
+  RINGING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum HttpMethod {
+  GET
+  POST
+  PUT
+  PATCH
+  DELETE
+}
+
+enum ToolAuthType {
+  NONE
+  API_KEY
+  BEARER
+  OAUTH
+}
+
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+enum CallEventType {
+  CALL_STARTED
+  CALL_RINGING
+  CALL_CONNECTED
+  CALL_ENDED
+  TRANSCRIPT_UPDATE
+  TRANSCRIPT_FINAL
+  TOOL_REQUESTED
+  TOOL_COMPLETED
+  TOOL_FAILED
+  AGENT_ACTION
+  ERROR
+}
+
+// ── Models ───────────────────────────────────────────────────────────────────
+
 /// Synced from SuperAdmin — NOT the source of truth for users.
-/// tenant_id in JWT maps to Tenant.id here.
 model Tenant {
   id          String     @id @default(uuid())
   slug        String     @unique
   name        String
-  /// AES-256-GCM encrypted Neon DB URL for tenant-isolated database routing.
-  /// Null means use the shared default database.
+  /// AES-256-GCM encrypted Neon DB URL for dedicated DB routing.
   databaseUrl String?
   plan        TenantPlan @default(FREE)
   settings    Json       @default("{}")
@@ -36,28 +88,27 @@ model Tenant {
 
   providerCredentials ProviderCredential[]
   auditLogs           AuditLog[]
+  agents              Agent[]
+  calls               Call[]
+  tools               Tool[]
 
   @@index([slug])
   @@map("tenants")
 }
 
-/// Tenant-specific API keys for voice AI providers.
-/// apiKey is AES-256-GCM encrypted at rest.
+/// Tenant-specific API keys for voice AI providers (apiKey encrypted at rest).
 model ProviderCredential {
-  id       String        @id @default(uuid())
-  tenantId String
-  provider VoiceProvider
-  /// AES-256-GCM encrypted API key for this provider.
-  apiKey   String
-  /// Custom endpoint URL override — if null, use global provider default.
-  apiUrl   String?
-  /// Provider-specific configuration (JSON).
-  config   Json          @default("{}")
-  isActive  Boolean      @default(true)
-  /// Only one default provider per tenant.
-  isDefault Boolean      @default(false)
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  id        String        @id @default(uuid())
+  tenantId  String
+  provider  VoiceProvider
+  /// AES-256-GCM encrypted API key.
+  apiKey    String
+  apiUrl    String?
+  config    Json          @default("{}")
+  isActive  Boolean       @default(true)
+  isDefault Boolean       @default(false)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -66,11 +117,150 @@ model ProviderCredential {
   @@map("provider_credentials")
 }
 
-/// Immutable audit log — userId comes from JWT, not a FK to any local user table.
+/// Global provider settings (not tenant-specific).
+model ProviderConfig {
+  id            String        @id @default(uuid())
+  provider      VoiceProvider @unique
+  displayName   String
+  isEnabled     Boolean       @default(true)
+  defaultConfig Json          @default("{}")
+  /// HMAC secret used to verify incoming webhook signatures.
+  webhookSecret String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@map("provider_configs")
+}
+
+/// Voice AI agent configuration, synced to the provider on create/update.
+model Agent {
+  id                 String        @id @default(uuid())
+  tenantId           String
+  ownerUserId        String
+  name               String
+  provider           VoiceProvider
+  /// Agent ID on the provider's side — null until first sync succeeds.
+  providerAgentId    String?
+  voiceLanguage      String        @default("en-IN")
+  voiceModel         String        @default("female")
+  systemPrompt       String        @db.Text
+  knowledgebaseId    String?
+  /// Array of Tool UUIDs assigned to this agent.
+  tools              Json          @default("[]")
+  workflowId         String?
+  maxConcurrentCalls Int           @default(1)
+  isActive           Boolean       @default(true)
+  metadata           Json?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  calls  Call[]
+
+  @@index([tenantId])
+  @@map("agents")
+}
+
+/// A single voice call — OUTBOUND by default, INBOUND for received calls.
+model Call {
+  id             String        @id @default(uuid())
+  tenantId       String
+  ownerUserId    String
+  agentId        String
+  phone          String
+  direction      CallDirection @default(OUTBOUND)
+  provider       VoiceProvider
+  providerCallId String?
+  status         CallStatus    @default(QUEUED)
+  duration       Int?
+  transcript     String?       @db.Text
+  summary        String?       @db.Text
+  recordingUrl   String?
+  /// Array of { toolId, toolName, result } objects.
+  toolsUsed      Json          @default("[]")
+  metadata       Json?
+  startedAt      DateTime?
+  endedAt        DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  agent         Agent          @relation(fields: [agentId], references: [id])
+  events        CallEvent[]
+  webhookEvents WebhookEvent[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, agentId])
+  @@map("calls")
+}
+
+/// HTTP tool that can be invoked by an agent during a call.
+model Tool {
+  id          String       @id @default(uuid())
+  tenantId    String
+  ownerUserId String
+  name        String
+  description String
+  endpoint    String
+  method      HttpMethod   @default(POST)
+  headers     Json         @default("{}")
+  bodyTemplate Json?
+  authType    ToolAuthType @default(NONE)
+  /// Encrypted JSON containing auth credentials (API key, token, etc.).
+  authConfig  Json         @default("{}")
+  timeout     Int          @default(30)
+  retries     Int          @default(0)
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("tools")
+}
+
+/// Raw webhook event received from a voice provider.
+model WebhookEvent {
+  id               String             @id @default(uuid())
+  /// Resolved after processing; null until the call is matched.
+  tenantId         String?
+  provider         VoiceProvider
+  eventType        String
+  providerCallId   String?
+  callId           String?
+  rawPayload       Json
+  processedPayload Json?
+  status           WebhookEventStatus @default(RECEIVED)
+  error            String?
+  createdAt        DateTime           @default(now())
+
+  call Call? @relation(fields: [callId], references: [id])
+
+  @@index([providerCallId])
+  @@index([tenantId, createdAt])
+  @@map("webhook_events")
+}
+
+/// Granular events emitted during a call lifecycle.
+model CallEvent {
+  id        String        @id @default(uuid())
+  tenantId  String
+  callId    String
+  eventType CallEventType
+  data      Json
+  createdAt DateTime      @default(now())
+
+  call Call @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@index([callId])
+  @@map("call_events")
+}
+
+/// Immutable audit trail. userId comes from JWT — no FK to a local user table.
 model AuditLog {
   id         String   @id @default(uuid())
   tenantId   String
-  /// User ID from JWT payload — no FK since there is no local users table.
   userId     String
   action     String
   resource   String

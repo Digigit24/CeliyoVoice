@@ -1,5 +1,9 @@
 import { Router } from 'express';
 import { healthRouter } from './health.routes';
+import { agentRouter } from './agents.routes';
+import { callRouter } from './calls.routes';
+import { toolRouter } from './tools.routes';
+import { providerRouter } from './providers.routes';
 import { tenantRateLimiter, superAdminRateLimiter } from '../middleware/rateLimiter';
 
 export const apiRouter = Router();
@@ -8,11 +12,9 @@ export const apiRouter = Router();
 apiRouter.use(tenantRateLimiter);
 apiRouter.use(superAdminRateLimiter);
 
-// Health + identity routes
+// Routes
 apiRouter.use('/health', healthRouter);
-
-// Future feature routes will be added here in subsequent prompts:
-// apiRouter.use('/agents', agentRouter);
-// apiRouter.use('/calls', callRouter);
-// apiRouter.use('/providers', providerRouter);
-// apiRouter.use('/tools', toolRouter);
+apiRouter.use('/agents', agentRouter);
+apiRouter.use('/calls', callRouter);
+apiRouter.use('/tools', toolRouter);
+apiRouter.use('/providers', providerRouter);
