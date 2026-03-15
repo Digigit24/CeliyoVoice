@@ -15,19 +15,20 @@ const envSchema = z.object({
   JWT_ALGORITHM: z.string().default('HS256'),
 
   // SuperAdmin service URL
-  SUPERADMIN_URL: z.string().url(),
+  SUPERADMIN_URL: z.string().url().default('https://admin.celiyo.com'),
 
   // Voice provider defaults (used if tenant has no custom credentials)
-  OMNIDIM_API_URL: z.string().url(),
-  OMNIDIM_API_KEY: z.string().min(1),
-  BOLNA_API_URL: z.string().url(),
-  BOLNA_API_KEY: z.string().min(1),
+  OMNIDIM_API_URL: z.string().url().default('https://api.omnidim.com'),
+  OMNIDIM_API_KEY: z.string().min(1).default(''),
+  // Bolna is optional — the adapter is a stub (Phase 2)
+  BOLNA_API_URL: z.string().url().default('https://api.bolna.ai'),
+  BOLNA_API_KEY: z.string().default(''),
 
   // Encryption — must be exactly 64 hex chars (32 bytes)
   ENCRYPTION_KEY: z.string().length(64),
 
-  // Hashing salt for API keys
-  API_KEY_SALT: z.string().min(8),
+  // Hashing salt for API keys (set a real value in production)
+  API_KEY_SALT: z.string().min(8).default('dev-salt-change-in-production'),
 
   // CORS
   CORS_ALLOWED_ORIGINS: z.string().default('http://localhost:5173,http://localhost:3000'),
