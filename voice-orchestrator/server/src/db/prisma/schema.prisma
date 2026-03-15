@@ -50,6 +50,16 @@ enum WebhookEventStatus {
   FAILED
 }
 
+enum PostCallActionType {
+  WEBHOOK
+}
+
+enum PostCallExecutionStatus {
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
 enum CallEventType {
   CALL_STARTED
   CALL_RINGING
@@ -130,7 +140,8 @@ model Agent {
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
-  calls Call[]
+  calls           Call[]
+  postCallActions PostCallAction[]
 
   @@unique([tenantId, providerAgentId])
   @@index([tenantId])
@@ -149,21 +160,25 @@ model Call {
   provider       VoiceProvider
   providerCallId String?
   status         CallStatus    @default(QUEUED)
-  duration       Int?
-  transcript     String?       @db.Text
-  summary        String?       @db.Text
-  recordingUrl   String?
+  duration           Int?
+  transcript         String?       @db.Text
+  summary            String?       @db.Text
+  recordingUrl       String?
+  sentiment          String?
+  extractedVariables Json?         @map("extracted_variables")
+  cost               Decimal?      @db.Decimal(10, 6)
   /// Array of { toolId, toolName, result } objects.
-  toolsUsed      Json          @default("[]")
-  metadata       Json?
-  startedAt      DateTime?
-  endedAt        DateTime?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  toolsUsed          Json          @default("[]")
+  metadata           Json?
+  startedAt          DateTime?
+  endedAt            DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
-  agent         Agent          @relation(fields: [agentId], references: [id])
-  events        CallEvent[]
-  webhookEvents WebhookEvent[]
+  agent              Agent              @relation(fields: [agentId], references: [id])
+  events             CallEvent[]
+  webhookEvents      WebhookEvent[]
+  postCallExecutions PostCallExecution[]
 
   @@index([tenantId, status])
   @@index([tenantId, agentId])
@@ -230,6 +245,48 @@ model CallEvent {
 
   @@index([callId])
   @@map("call_events")
+}
+
+/// Post-call outbound action configured per-agent (e.g. fire a webhook when call ends).
+model PostCallAction {
+  id          String              @id @default(uuid())
+  tenantId    String
+  agentId     String
+  name        String
+  type        PostCallActionType  @default(WEBHOOK)
+  /// Type-specific config JSON.
+  /// WEBHOOK: { url, method, headers, includeRawPayload, secret? }
+  config      Json                @default("{}")
+  isEnabled   Boolean             @default(true)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  agent      Agent               @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  executions PostCallExecution[]
+
+  @@index([tenantId, agentId])
+  @@map("post_call_actions")
+}
+
+/// Execution log for each PostCallAction fired after a call ends.
+model PostCallExecution {
+  id              String                 @id @default(uuid())
+  tenantId        String
+  actionId        String
+  callId          String?
+  status          PostCallExecutionStatus
+  requestPayload  Json?
+  responseStatus  Int?
+  responseBody    String?                @db.Text
+  error           String?
+  executedAt      DateTime               @default(now())
+
+  action PostCallAction @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  call   Call?          @relation(fields: [callId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, actionId])
+  @@index([tenantId, callId])
+  @@map("post_call_executions")
 }
 
 /// Immutable audit trail. userId comes from JWT — no FK to a local user table.

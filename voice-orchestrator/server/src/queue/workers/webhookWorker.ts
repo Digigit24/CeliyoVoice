@@ -8,6 +8,7 @@ import { publish } from '../../events/eventBus';
 import { VoiceEventType } from '../../events/eventTypes';
 import { logger } from '../../utils/logger';
 import type { NormalizedWebhookEvent } from '../../providers/interfaces/voiceProvider.interface';
+import { PostCallService } from '../../postCall/postCall.service';
 
 export function startWebhookWorker(): Worker<WebhookJobData, void, string> {
   const worker = new Worker<WebhookJobData, void, string>(
@@ -66,6 +67,15 @@ export function startWebhookWorker(): Worker<WebhookJobData, void, string> {
             status: WebhookEventStatus.PROCESSED,
           },
         });
+
+        // ── Post-call processing ────────────────────────────────────────────
+        // Run regardless of whether we matched a Call — the service handles
+        // unmatched payloads gracefully.
+        const postCallSvc = new PostCallService(defaultPrismaClient as unknown as import('@prisma/client').PrismaClient);
+        await postCallSvc.process(
+          provider as import('@prisma/client').VoiceProvider,
+          webhookEvent.rawPayload as Record<string, unknown>,
+        );
 
         if (!call || !tenantId) {
           log.warn({ providerCallId: normalized.providerCallId }, 'No matching call — event stored but not published');

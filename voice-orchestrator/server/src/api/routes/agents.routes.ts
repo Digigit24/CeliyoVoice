@@ -12,6 +12,14 @@ import {
   listRemoteBolna,
   syncAgent,
 } from '../../agents/agent.controller';
+import {
+  listActions,
+  createAction,
+  updateAction,
+  deleteAction,
+  listExecutions,
+  getWebhookUrl,
+} from '../../postCall/postCallAction.controller';
 
 export const agentRouter = Router();
 
@@ -32,3 +40,13 @@ agentRouter.delete('/:id', requirePermission('voiceai.agents.delete'), deleteAge
 
 // ── Sync route ────────────────────────────────────────────────────────────────
 agentRouter.post('/:id/sync', requirePermission('voiceai.agents.edit'), syncAgent);
+
+// ── Post-call action routes (must come before /:id to avoid conflicts) ────────
+// Static sub-routes first
+agentRouter.get('/:agentId/post-call-actions/webhook-url', requirePermission('voiceai.agents.view'), getWebhookUrl);
+agentRouter.get('/:agentId/post-call-actions/executions', requirePermission('voiceai.agents.view'), listExecutions);
+// CRUD
+agentRouter.get('/:agentId/post-call-actions', requirePermission('voiceai.agents.view'), listActions);
+agentRouter.post('/:agentId/post-call-actions', requirePermission('voiceai.agents.edit'), createAction);
+agentRouter.put('/:agentId/post-call-actions/:actionId', requirePermission('voiceai.agents.edit'), updateAction);
+agentRouter.delete('/:agentId/post-call-actions/:actionId', requirePermission('voiceai.agents.edit'), deleteAction);

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
   Bot,
@@ -24,6 +24,15 @@ import {
   PhoneForwarded,
   Variable,
   ExternalLink,
+  Webhook,
+  Plus,
+  Trash,
+  ToggleLeft,
+  ToggleRight,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Link,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -31,6 +40,8 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import {
@@ -717,6 +728,344 @@ function CallsTab({ agentId }: { agentId: string }) {
   );
 }
 
+// ── Post-Call tab ──────────────────────────────────────────────────────────────
+
+interface PostCallAction {
+  id: string;
+  name: string;
+  type: 'WEBHOOK';
+  config: {
+    url: string;
+    method: string;
+    headers: Record<string, string>;
+    includeRawPayload: boolean;
+    secret?: string;
+  };
+  isEnabled: boolean;
+  createdAt: string;
+}
+
+interface PostCallExecution {
+  id: string;
+  status: 'SUCCESS' | 'FAILED' | 'SKIPPED';
+  responseStatus?: number;
+  error?: string;
+  executedAt: string;
+  action: { name: string; type: string };
+}
+
+const EXEC_STATUS: Record<string, { icon: typeof CheckCircle; cls: string; label: string }> = {
+  SUCCESS: { icon: CheckCircle, cls: 'text-green-600', label: 'Success' },
+  FAILED:  { icon: XCircle,     cls: 'text-red-600',   label: 'Failed' },
+  SKIPPED: { icon: Clock,       cls: 'text-muted-foreground', label: 'Skipped' },
+};
+
+function AddActionDialog({ agentId, onClose }: { agentId: string; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState({
+    name: '',
+    url: '',
+    method: 'POST',
+    secret: '',
+    includeRawPayload: false,
+  });
+
+  const mutation = useMutation({
+    mutationFn: (body: object) =>
+      api.post(`/agents/${agentId}/post-call-actions`, body).then((r) => r.data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['post-call-actions', agentId] });
+      toast({ title: 'Action created' });
+      onClose();
+    },
+    onError: () => toast({ variant: 'destructive', title: 'Failed to create action' }),
+  });
+
+  const handleSave = () => {
+    mutation.mutate({
+      name: form.name,
+      type: 'WEBHOOK',
+      config: {
+        url: form.url,
+        method: form.method,
+        headers: {},
+        includeRawPayload: form.includeRawPayload,
+        ...(form.secret ? { secret: form.secret } : {}),
+      },
+    });
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Webhook className="h-4 w-4" /> Add Webhook Action
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 pt-1">
+          <div className="space-y-1.5">
+            <Label>Action Name <span className="text-destructive">*</span></Label>
+            <Input
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="e.g. Send to CRM"
+            />
+          </div>
+
+          <div className="flex gap-2">
+            <div className="flex-1 space-y-1.5">
+              <Label>Webhook URL <span className="text-destructive">*</span></Label>
+              <Input
+                value={form.url}
+                onChange={(e) => setForm({ ...form, url: e.target.value })}
+                placeholder="https://your-server.com/hook"
+                className="font-mono text-sm"
+              />
+            </div>
+            <div className="w-24 space-y-1.5">
+              <Label>Method</Label>
+              <Select value={form.method} onValueChange={(v) => setForm({ ...form, method: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="POST">POST</SelectItem>
+                  <SelectItem value="PUT">PUT</SelectItem>
+                  <SelectItem value="PATCH">PATCH</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Signing Secret <span className="text-xs text-muted-foreground font-normal">(optional)</span></Label>
+            <Input
+              value={form.secret}
+              onChange={(e) => setForm({ ...form, secret: e.target.value })}
+              placeholder="hmac secret for X-Webhook-Signature header"
+              type="password"
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="include-raw"
+              checked={form.includeRawPayload}
+              onChange={(e) => setForm({ ...form, includeRawPayload: e.target.checked })}
+              className="h-4 w-4 rounded border"
+            />
+            <label htmlFor="include-raw" className="text-sm text-muted-foreground cursor-pointer">
+              Include raw provider payload in request body
+            </label>
+          </div>
+        </div>
+        <DialogFooter className="pt-2">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            onClick={handleSave}
+            disabled={mutation.isPending || !form.name || !form.url}
+          >
+            {mutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Save Action
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function PostCallTab({ agentId }: { agentId: string }) {
+  const queryClient = useQueryClient();
+  const [addOpen, setAddOpen] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState(false);
+
+  const { data: urlData } = useQuery({
+    queryKey: ['post-call-webhook-url', agentId],
+    queryFn: () =>
+      api.get(`/agents/${agentId}/post-call-actions/webhook-url`).then((r) => r.data.data as { url: string }),
+  });
+
+  const { data: actionsData, isLoading: actionsLoading } = useQuery({
+    queryKey: ['post-call-actions', agentId],
+    queryFn: () =>
+      api.get(`/agents/${agentId}/post-call-actions`).then((r) => r.data.data as PostCallAction[]),
+  });
+
+  const { data: execData } = useQuery({
+    queryKey: ['post-call-executions', agentId],
+    queryFn: () =>
+      api.get(`/agents/${agentId}/post-call-actions/executions`).then((r) => r.data.data as PostCallExecution[]),
+    refetchInterval: 30_000,
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: ({ id, isEnabled }: { id: string; isEnabled: boolean }) =>
+      api.put(`/agents/${agentId}/post-call-actions/${id}`, { isEnabled }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['post-call-actions', agentId] }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/agents/${agentId}/post-call-actions/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['post-call-actions', agentId] });
+      toast({ title: 'Action deleted' });
+    },
+  });
+
+  const webhookUrl = urlData?.url ?? '';
+
+  const copyUrl = async () => {
+    await navigator.clipboard.writeText(webhookUrl);
+    setCopiedUrl(true);
+    setTimeout(() => setCopiedUrl(false), 2000);
+  };
+
+  const actions = actionsData ?? [];
+  const executions = execData ?? [];
+
+  return (
+    <div className="space-y-6">
+      {/* ── Incoming Webhook URL ─────────────────────────────────────── */}
+      <div className="rounded-xl border bg-gradient-to-br from-blue-50/50 to-indigo-50/50 dark:from-blue-950/20 dark:to-indigo-950/20 p-5">
+        <div className="flex items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-900">
+            <Link className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold text-sm">Incoming Webhook URL</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Paste this URL in your Omnidim dashboard → Agent → Post-Call → Delivery Method → Webhook
+            </p>
+            <div className="mt-3 flex items-center gap-2">
+              <code className="flex-1 truncate rounded-md bg-background border px-3 py-1.5 text-xs font-mono">
+                {webhookUrl || 'Loading…'}
+              </code>
+              <Button variant="outline" size="sm" onClick={copyUrl} className="shrink-0 gap-1.5">
+                {copiedUrl ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                {copiedUrl ? 'Copied' : 'Copy'}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-lg border bg-background/60 p-3">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Setup Instructions</p>
+          <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+            <li>Open the Omnidim dashboard and go to your agent</li>
+            <li>Click <strong>Post-Call</strong> tab → <strong>Delivery Method</strong> → select <strong>Webhook</strong></li>
+            <li>Paste the URL above into the webhook URL field</li>
+            <li>Select what to include: Summary, Sentiment, Extracted Variables, Full Conversation</li>
+            <li>Save — Omnidim will POST after every completed call</li>
+          </ol>
+        </div>
+      </div>
+
+      {/* ── Outbound Actions ─────────────────────────────────────────── */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <p className="font-semibold text-sm">Outbound Actions</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Actions fired after every call ends — forward data to your CRM, database, or any HTTP endpoint
+            </p>
+          </div>
+          <Button size="sm" onClick={() => setAddOpen(true)} className="gap-1.5">
+            <Plus className="h-3.5 w-3.5" />
+            Add Action
+          </Button>
+        </div>
+
+        {actionsLoading ? (
+          <div className="flex h-24 items-center justify-center">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : actions.length === 0 ? (
+          <div className="flex h-28 items-center justify-center rounded-xl border border-dashed">
+            <div className="text-center">
+              <Webhook className="mx-auto h-8 w-8 text-muted-foreground/40 mb-2" />
+              <p className="text-sm text-muted-foreground">No actions configured</p>
+              <p className="text-xs text-muted-foreground/70 mt-0.5">Add a webhook to forward call data after each call</p>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {actions.map((action) => (
+              <div key={action.id} className="flex items-center gap-3 rounded-lg border bg-card px-4 py-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
+                  <Webhook className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{action.name}</p>
+                  <p className="text-xs text-muted-foreground font-mono truncate">
+                    {action.config.method} {action.config.url}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={`text-xs font-medium ${action.isEnabled ? 'text-green-600' : 'text-muted-foreground'}`}>
+                    {action.isEnabled ? 'On' : 'Off'}
+                  </span>
+                  <button
+                    onClick={() => toggleMutation.mutate({ id: action.id, isEnabled: !action.isEnabled })}
+                    className="text-muted-foreground hover:text-foreground transition-colors"
+                    disabled={toggleMutation.isPending}
+                  >
+                    {action.isEnabled
+                      ? <ToggleRight className="h-5 w-5 text-primary" />
+                      : <ToggleLeft className="h-5 w-5" />}
+                  </button>
+                  <button
+                    onClick={() => deleteMutation.mutate(action.id)}
+                    className="text-muted-foreground hover:text-destructive transition-colors"
+                    disabled={deleteMutation.isPending}
+                  >
+                    <Trash className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Execution Log ────────────────────────────────────────────── */}
+      {executions.length > 0 && (
+        <div>
+          <p className="font-semibold text-sm mb-3">Recent Executions</p>
+          <div className="rounded-xl border overflow-hidden">
+            <div className="divide-y">
+              {executions.slice(0, 20).map((exec) => {
+                const cfg = EXEC_STATUS[exec.status] ?? EXEC_STATUS.FAILED;
+                const Icon = cfg.icon;
+                return (
+                  <div key={exec.id} className="flex items-center gap-3 px-4 py-2.5">
+                    <Icon className={`h-4 w-4 shrink-0 ${cfg.cls}`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm truncate">{exec.action.name}</p>
+                      {exec.error && (
+                        <p className="text-xs text-destructive truncate">{exec.error}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 text-xs text-muted-foreground">
+                      {exec.responseStatus != null && (
+                        <span className={`font-mono font-medium ${exec.responseStatus < 400 ? 'text-green-600' : 'text-red-600'}`}>
+                          {exec.responseStatus}
+                        </span>
+                      )}
+                      <span>{new Date(exec.executedAt).toLocaleTimeString()}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {addOpen && <AddActionDialog agentId={agentId} onClose={() => setAddOpen(false)} />}
+    </div>
+  );
+}
+
 // ── Tools tab ─────────────────────────────────────────────────────────────────
 
 function ToolsTab() {
@@ -861,6 +1210,7 @@ export default function AgentDetail() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="config">Provider Config</TabsTrigger>
           <TabsTrigger value="calls">Calls</TabsTrigger>
+          <TabsTrigger value="post-call">Post-Call</TabsTrigger>
           <TabsTrigger value="tools">Tools</TabsTrigger>
         </TabsList>
 
@@ -874,6 +1224,10 @@ export default function AgentDetail() {
 
         <TabsContent value="calls" className="mt-4">
           <CallsTab agentId={id!} />
+        </TabsContent>
+
+        <TabsContent value="post-call" className="mt-4">
+          <PostCallTab agentId={id!} />
         </TabsContent>
 
         <TabsContent value="tools" className="mt-4">
