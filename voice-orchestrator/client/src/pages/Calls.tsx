@@ -15,7 +15,6 @@ import {
   DollarSign,
   ChevronRight,
   X,
-  Play,
   MessageSquare,
   BarChart2,
   Sparkles,
@@ -236,20 +235,38 @@ function CallDetailDrawer({ log, onClose }: { log: OmnidimCallLog; onClose: () =
           </div>
 
           {/* Recording */}
-          {log.recording_url && (
-            <div className="rounded-lg border p-4">
-              <p className="mb-2 text-sm font-medium">Recording</p>
-              <a
-                href={String(log.recording_url)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-              >
-                <Play className="h-3.5 w-3.5" />
-                Play Recording
-              </a>
-            </div>
-          )}
+          {(log.internal_recording_url || log.recording_url) && (() => {
+            const raw = log.internal_recording_url ?? log.recording_url ?? '';
+            const audioSrc = typeof raw === 'string' && raw.startsWith('https://')
+              ? raw
+              : typeof raw === 'string' && raw.startsWith('/')
+                ? `https://www.omnidim.io${raw}`
+                : String(raw);
+            return (
+              <div className="rounded-lg border p-4 space-y-3">
+                <p className="flex items-center gap-1.5 text-sm font-medium">
+                  <Mic className="h-4 w-4 text-muted-foreground" /> Recording
+                </p>
+                <audio
+                  controls
+                  src={audioSrc}
+                  className="w-full h-10"
+                  preload="metadata"
+                >
+                  Your browser does not support the audio element.
+                </audio>
+                <a
+                  href={audioSrc}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  Open in new tab
+                </a>
+              </div>
+            );
+          })()}
 
           {/* Sentiment */}
           {log.sentiment_analysis_details && (
