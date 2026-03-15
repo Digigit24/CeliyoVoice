@@ -223,7 +223,7 @@ function DispatchDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (
 // ── Omnidim remote logs tab ───────────────────────────────────────────────────
 
 function OmnidimLogsTab() {
-  const [statusFilter, setStatusFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [page, setPage] = useState(1);
 
   const { data, isLoading, error, refetch, isFetching } = useQuery<{
@@ -232,7 +232,7 @@ function OmnidimLogsTab() {
     queryKey: ['remote-call-logs', statusFilter, page],
     queryFn: () =>
       api.get('/calls/logs/remote', {
-        params: { call_status: statusFilter || undefined, page, pageSize: 20 },
+        params: { call_status: statusFilter !== 'all' ? statusFilter : undefined, page, pageSize: 20 },
       }).then((r) => r.data),
     refetchInterval: 30_000,
   });
@@ -248,7 +248,7 @@ function OmnidimLogsTab() {
             <SelectValue placeholder="All statuses" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">All</SelectItem>
+            <SelectItem value="all">All</SelectItem>
             <SelectItem value="completed">Completed</SelectItem>
             <SelectItem value="failed">Failed</SelectItem>
             <SelectItem value="busy">Busy</SelectItem>
@@ -338,13 +338,13 @@ function OmnidimLogsTab() {
 
 function LocalCallsTab() {
   const queryClient = useQueryClient();
-  const [statusFilter, setStatusFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
 
   const { data, isLoading } = useQuery<{ data: LocalCall[]; meta: { total: number } }>({
     queryKey: ['calls', statusFilter],
     queryFn: () =>
       api.get('/calls', {
-        params: { status: statusFilter || undefined, limit: 50, sortBy: 'createdAt', sortOrder: 'desc' },
+        params: { status: statusFilter !== 'all' ? statusFilter : undefined, limit: 50, sortBy: 'createdAt', sortOrder: 'desc' },
       }).then((r) => r.data),
     refetchInterval: 15_000,
   });
@@ -367,7 +367,7 @@ function LocalCallsTab() {
           <SelectValue placeholder="All statuses" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="">All</SelectItem>
+          <SelectItem value="all">All</SelectItem>
           <SelectItem value="RINGING">Ringing</SelectItem>
           <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
           <SelectItem value="COMPLETED">Completed</SelectItem>
