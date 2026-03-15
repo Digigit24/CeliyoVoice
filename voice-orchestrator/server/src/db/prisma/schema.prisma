@@ -1,0 +1,88 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantPlan {
+  FREE
+  STARTER
+  PRO
+  ENTERPRISE
+}
+
+enum VoiceProvider {
+  OMNIDIM
+  BOLNA
+}
+
+/// Synced from SuperAdmin — NOT the source of truth for users.
+/// tenant_id in JWT maps to Tenant.id here.
+model Tenant {
+  id          String     @id @default(uuid())
+  slug        String     @unique
+  name        String
+  /// AES-256-GCM encrypted Neon DB URL for tenant-isolated database routing.
+  /// Null means use the shared default database.
+  databaseUrl String?
+  plan        TenantPlan @default(FREE)
+  settings    Json       @default("{}")
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  providerCredentials ProviderCredential[]
+  auditLogs           AuditLog[]
+
+  @@index([slug])
+  @@map("tenants")
+}
+
+/// Tenant-specific API keys for voice AI providers.
+/// apiKey is AES-256-GCM encrypted at rest.
+model ProviderCredential {
+  id       String        @id @default(uuid())
+  tenantId String
+  provider VoiceProvider
+  /// AES-256-GCM encrypted API key for this provider.
+  apiKey   String
+  /// Custom endpoint URL override — if null, use global provider default.
+  apiUrl   String?
+  /// Provider-specific configuration (JSON).
+  config   Json          @default("{}")
+  isActive  Boolean      @default(true)
+  /// Only one default provider per tenant.
+  isDefault Boolean      @default(false)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, provider])
+  @@index([tenantId])
+  @@map("provider_credentials")
+}
+
+/// Immutable audit log — userId comes from JWT, not a FK to any local user table.
+model AuditLog {
+  id         String   @id @default(uuid())
+  tenantId   String
+  /// User ID from JWT payload — no FK since there is no local users table.
+  userId     String
+  action     String
+  resource   String
+  resourceId String?
+  metadata   Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, userId])
+  @@index([tenantId, resource])
+  @@map("audit_logs")
+}

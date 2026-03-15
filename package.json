@@ -1,0 +1,14 @@
+{
+  "name": "celiyo-voice",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "voice-orchestrator/server",
+    "voice-orchestrator/client"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=voice-orchestrator/server",
+    "build": "npm run build --workspace=voice-orchestrator/server",
+    "start": "npm run start --workspace=voice-orchestrator/server"
+  }
+}
