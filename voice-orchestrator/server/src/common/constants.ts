@@ -13,6 +13,7 @@ export const PUBLIC_PATHS: readonly string[] = [
   '/auth',
   '/static',
   '/webhooks',
+  '/api/v1/auth/login',
 ] as const;
 
 /** HTTP header names for tenant identification (mirrors SuperAdmin convention). */

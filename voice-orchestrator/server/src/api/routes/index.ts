@@ -4,6 +4,8 @@ import { agentRouter } from './agents.routes';
 import { callRouter } from './calls.routes';
 import { toolRouter } from './tools.routes';
 import { providerRouter } from './providers.routes';
+import { authRouter } from '../../auth/auth.routes';
+import { dashboardRouter } from '../../dashboard/dashboard.routes';
 import { tenantRateLimiter, superAdminRateLimiter } from '../middleware/rateLimiter';
 
 export const apiRouter = Router();
@@ -14,6 +16,8 @@ apiRouter.use(superAdminRateLimiter);
 
 // Routes
 apiRouter.use('/health', healthRouter);
+apiRouter.use('/auth', authRouter);
+apiRouter.use('/dashboard', dashboardRouter);
 apiRouter.use('/agents', agentRouter);
 apiRouter.use('/calls', callRouter);
 apiRouter.use('/tools', toolRouter);
