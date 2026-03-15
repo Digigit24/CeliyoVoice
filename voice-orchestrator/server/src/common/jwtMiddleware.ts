@@ -84,8 +84,8 @@ export async function jwtMiddleware(
     }
   }
 
-  // Check module access
-  if (!payload.enabled_modules.includes(MODULE_NAME)) {
+  // Check module access — super admins bypass this check
+  if (!payload.is_super_admin && !payload.enabled_modules.includes(MODULE_NAME)) {
     res.status(403).json({
       success: false,
       error: {
