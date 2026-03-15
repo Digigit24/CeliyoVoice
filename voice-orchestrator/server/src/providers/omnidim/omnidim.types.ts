@@ -87,6 +87,53 @@ export interface OmnidimErrorResponse {
   code?: string;
 }
 
+// ── Call dispatch & logs ──────────────────────────────────────────────────────
+
+export interface OmnidimDispatchCallPayload {
+  agent_id: number;
+  to_number: string;
+  from_number_id?: string | number;
+  call_context?: Record<string, unknown>;
+}
+
+export interface OmnidimDispatchCallResponse {
+  call_id?: string | number;
+  status?: string;
+  message?: string;
+  success?: boolean;
+  [key: string]: unknown;
+}
+
+export interface OmnidimCallLogEntry {
+  call_log_id?: string | number;
+  id?: string | number;
+  agent_id?: number;
+  agent_name?: string;
+  to_number?: string;
+  from_number?: string;
+  call_status?: string;
+  status?: string;
+  duration?: number;
+  transcript?: string;
+  summary?: string;
+  recording_url?: string;
+  created_at?: string;
+  started_at?: string;
+  ended_at?: string;
+  call_cost?: number;
+  [key: string]: unknown;
+}
+
+export interface OmnidimCallLogsResponse {
+  call_logs?: OmnidimCallLogEntry[];
+  logs?: OmnidimCallLogEntry[];
+  total_records?: number;
+  total?: number;
+  page?: number;
+  page_size?: number;
+  [key: string]: unknown;
+}
+
 // ── Full agent config types (for import/detail view) ─────────────────────────
 
 export interface OmnidimContextBreakdown {

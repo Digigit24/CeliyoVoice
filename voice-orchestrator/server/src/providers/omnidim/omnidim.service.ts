@@ -4,6 +4,10 @@ import type {
   OmnidimFullAgent,
   OmnidimAgentListResponse,
   OmnidimCreateAgentPayload,
+  OmnidimDispatchCallPayload,
+  OmnidimDispatchCallResponse,
+  OmnidimCallLogsResponse,
+  OmnidimCallLogEntry,
 } from './omnidim.types';
 
 // ── Custom errors ─────────────────────────────────────────────────────────────
@@ -184,6 +188,45 @@ export class OmnidimService {
       await this.http.delete(`/agents/${agentId}`);
     } catch (err) {
       this.handleError(err, 'deleteAgent');
+    }
+  }
+
+  // ── Call methods ────────────────────────────────────────────────────────────
+
+  /** POST /calls/dispatch */
+  async dispatchCall(payload: OmnidimDispatchCallPayload): Promise<OmnidimDispatchCallResponse> {
+    try {
+      const { data } = await this.http.post<OmnidimDispatchCallResponse>('/calls/dispatch', payload);
+      return data;
+    } catch (err) {
+      this.handleError(err, 'dispatchCall');
+    }
+  }
+
+  /** GET /calls/logs — paginated list with optional filters */
+  async getCallLogs(opts: {
+    pageno?: number;
+    pagesize?: number;
+    agentid?: number;
+    call_status?: string;
+  }): Promise<OmnidimCallLogsResponse> {
+    try {
+      const { data } = await this.http.get<OmnidimCallLogsResponse>('/calls/logs', {
+        params: opts,
+      });
+      return data;
+    } catch (err) {
+      this.handleError(err, 'getCallLogs');
+    }
+  }
+
+  /** GET /calls/logs/{call_log_id} */
+  async getCallLog(callLogId: string): Promise<OmnidimCallLogEntry> {
+    try {
+      const { data } = await this.http.get<OmnidimCallLogEntry>(`/calls/logs/${callLogId}`);
+      return data;
+    } catch (err) {
+      this.handleError(err, 'getCallLog');
     }
   }
 }

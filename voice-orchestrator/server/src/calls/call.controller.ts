@@ -63,3 +63,41 @@ export const getCall: RequestHandler<IdParam> = async (req, res) => {
   if (!call) return errorResponse(res, 'Call not found', 'NOT_FOUND', 404);
   return success(res, call);
 };
+
+/**
+ * GET /api/v1/calls/logs/remote
+ * Fetch call logs directly from Omnidim.
+ * Query params: agentId (our UUID), page, pageSize, call_status
+ */
+export const listRemoteLogs: RequestHandler = async (req, res) => {
+  const { agentId, page, pageSize, call_status } = req.query as Record<string, string | undefined>;
+
+  try {
+    const svc = new CallService(req.prisma!);
+
+    // If agentId (our UUID) provided, look up its providerAgentId
+    let agentProviderAgentId: string | undefined;
+    if (agentId) {
+      const agent = await req.prisma!.agent.findFirst({
+        where: { id: agentId, tenantId: req.tenantId! },
+        select: { providerAgentId: true },
+      });
+      agentProviderAgentId = agent?.providerAgentId ?? undefined;
+    }
+
+    const result = await svc.listOmnidimLogs(req.tenantId!, {
+      agentProviderAgentId,
+      call_status,
+      page: page ? parseInt(page, 10) : 1,
+      pageSize: pageSize ? parseInt(pageSize, 10) : 20,
+    });
+
+    return success(res, result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to fetch remote logs';
+    if (message.includes('No credentials')) {
+      return errorResponse(res, message, 'CREDENTIALS_MISSING', 400);
+    }
+    return errorResponse(res, 'Failed to fetch call logs from provider', 'PROVIDER_ERROR', 502);
+  }
+};

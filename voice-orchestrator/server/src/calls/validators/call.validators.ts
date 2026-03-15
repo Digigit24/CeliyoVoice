@@ -3,6 +3,10 @@ import { z } from 'zod';
 export const StartCallSchema = z.object({
   agentId: z.string().uuid('agentId must be a valid UUID'),
   phone: z.string().regex(/^\+[1-9]\d{1,14}$/, 'Phone must be in E.164 format (+1234567890)'),
+  /** Omnidim: imported phone number id to call from */
+  fromNumberId: z.union([z.string(), z.number()]).optional(),
+  /** Omnidim: key-value context passed to agent during call */
+  callContext: z.record(z.unknown()).optional(),
   metadata: z.record(z.unknown()).optional(),
 });
 

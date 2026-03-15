@@ -2,6 +2,9 @@ import type { PrismaClient, Call, CallStatus, VoiceProvider } from '@prisma/clie
 import { Prisma } from '@prisma/client';
 import { callQueue } from '../queue/queues';
 import { getProvider } from '../providers/providerRouter';
+import { resolveCredentials } from '../providers/credentialResolver';
+import { OmnidimService } from '../providers/omnidim/omnidim.service';
+import type { OmnidimCallLogEntry } from '../providers/omnidim/omnidim.types';
 import { logger } from '../utils/logger';
 import type { StartCallInput } from './validators/call.validators';
 
@@ -42,7 +45,7 @@ export class CallService {
       throw err;
     }
 
-    // Create call record with QUEUED status
+    // Create call record in QUEUED state
     const call = await this.prisma.call.create({
       data: {
         tenantId,
@@ -55,7 +58,53 @@ export class CallService {
       },
     });
 
-    // Queue the call for async processing
+    // For Omnidim: dispatch directly via API (no queue needed — call is async on their side)
+    if (agent.provider === 'OMNIDIM') {
+      if (!agent.providerAgentId) {
+        await this.prisma.call.update({ where: { id: call.id }, data: { status: 'FAILED' } });
+        const err = new Error('Agent has not been imported from Omnidim yet (no providerAgentId)');
+        (err as NodeJS.ErrnoException & { statusCode: number }).statusCode = 400;
+        throw err;
+      }
+
+      try {
+        const creds = await resolveCredentials(tenantId, 'OMNIDIM', this.prisma);
+        const svc = new OmnidimService(creds.apiKey, creds.apiUrl);
+
+        const dispatchPayload = {
+          agent_id: Number(agent.providerAgentId),
+          to_number: input.phone,
+          ...(input.fromNumberId !== undefined ? { from_number_id: input.fromNumberId } : {}),
+          ...(input.callContext ? { call_context: input.callContext } : {}),
+        };
+
+        logger.info({ tenantId, callId: call.id, dispatchPayload }, 'Dispatching call to Omnidim');
+        const response = await svc.dispatchCall(dispatchPayload);
+
+        // Store provider call ID from response
+        const providerCallId = String(
+          response.call_id ?? response.id ?? '',
+        );
+
+        await this.prisma.call.update({
+          where: { id: call.id },
+          data: {
+            status: 'RINGING',
+            providerCallId: providerCallId || null,
+            startedAt: new Date(),
+          },
+        });
+
+        logger.info({ callId: call.id, providerCallId, response }, 'Call dispatched to Omnidim');
+      } catch (err) {
+        await this.prisma.call.update({ where: { id: call.id }, data: { status: 'FAILED' } });
+        throw err;
+      }
+
+      return this.prisma.call.findUniqueOrThrow({ where: { id: call.id } });
+    }
+
+    // For other providers: use queue
     await callQueue.add(
       'start-call' as string,
       {
@@ -66,14 +115,36 @@ export class CallService {
         provider: agent.provider,
         metadata: input.metadata,
       },
-      {
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 2000 },
-      },
+      { attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
     );
 
     logger.info({ callId: call.id, tenantId, phone: input.phone }, 'Call queued');
     return call;
+  }
+
+  /**
+   * Fetch call logs directly from Omnidim for a given agent.
+   * Uses the tenant's stored credentials.
+   */
+  async listOmnidimLogs(
+    tenantId: string,
+    opts: { agentProviderAgentId?: string; call_status?: string; page?: number; pageSize?: number },
+  ): Promise<{ logs: OmnidimCallLogEntry[]; total: number }> {
+    const creds = await resolveCredentials(tenantId, 'OMNIDIM', this.prisma);
+    const svc = new OmnidimService(creds.apiKey, creds.apiUrl);
+
+    const resp = await svc.getCallLogs({
+      pageno: opts.page ?? 1,
+      pagesize: opts.pageSize ?? 20,
+      ...(opts.agentProviderAgentId ? { agentid: Number(opts.agentProviderAgentId) } : {}),
+      ...(opts.call_status ? { call_status: opts.call_status } : {}),
+    });
+
+    // Omnidim may return call_logs or logs key
+    const logs = resp.call_logs ?? resp.logs ?? [];
+    const total = resp.total_records ?? resp.total ?? logs.length;
+
+    return { logs, total };
   }
 
   async endCall(id: string, tenantId: string): Promise<Call | null> {
