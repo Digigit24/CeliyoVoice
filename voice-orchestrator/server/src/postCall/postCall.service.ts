@@ -182,7 +182,7 @@ export class PostCallService {
     tenantId: string,
     data: NormalizedPostCallData,
   ): Promise<void> {
-    const cfg = action.config as WebhookActionConfig;
+    const cfg = action.config as unknown as WebhookActionConfig;
     const startedAt = Date.now();
 
     // Build outbound payload
