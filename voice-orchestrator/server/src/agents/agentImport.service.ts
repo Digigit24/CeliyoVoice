@@ -262,7 +262,7 @@ export class AgentImportService {
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         logger.warn({ tenantId, agentId: remoteAgent.id, err }, 'importAllFromOmnidim: failed to import agent');
-        result.failed.push({ id: remoteAgent.id, error: errorMsg });
+        result.failed.push({ id: String(remoteAgent.id), error: errorMsg });
       }
     }
 
