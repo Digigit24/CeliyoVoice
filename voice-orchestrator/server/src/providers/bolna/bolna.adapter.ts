@@ -32,7 +32,7 @@ export class BolnaAdapter implements IVoiceProvider {
 
   async updateAgent(providerAgentId: string, payload: AgentUpdatePayload): Promise<void> {
     const patchPayload = toBolnaPatchPayload(payload);
-    await this.svc.patchAgent(providerAgentId, patchPayload);
+    await this.svc.patchAgent(providerAgentId, patchPayload as any);
     logger.info({ provider: 'BOLNA', providerAgentId }, 'Agent updated on Bolna');
   }
 
