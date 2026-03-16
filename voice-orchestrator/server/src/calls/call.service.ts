@@ -122,7 +122,7 @@ export class CallService {
         const dispatchPayload = {
           agent_id: agent.providerAgentId,
           recipient_phone_number: input.phone,
-          ...(input.fromNumberId ? { from_phone_number: input.fromNumberId } : {}),
+          ...(input.fromNumberId ? { from_phone_number: String(input.fromNumberId) } : {}),
           ...(input.callContext ? { user_data: input.callContext as Record<string, string> } : {}),
         };
 
