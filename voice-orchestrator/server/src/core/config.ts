@@ -3,6 +3,7 @@ import { env } from './env';
 export const config = {
   env: env.NODE_ENV,
   port: env.PORT,
+  baseUrl: env.BASE_URL ?? `http://localhost:${env.PORT}`,
   isProduction: env.NODE_ENV === 'production',
   isDevelopment: env.NODE_ENV === 'development',
 

@@ -24,8 +24,8 @@ async function bootstrap(): Promise<void> {
 
   const server = app.listen(config.port, () => {
     logger.info(
-      { port: config.port, env: config.env, module: config.module.name },
-      `Voice Orchestrator listening on port ${config.port}`,
+      { port: config.port, env: config.env, module: config.module.name, baseUrl: config.baseUrl },
+      `Voice Orchestrator listening on port ${config.port} — base URL: ${config.baseUrl}`,
     );
   });
 

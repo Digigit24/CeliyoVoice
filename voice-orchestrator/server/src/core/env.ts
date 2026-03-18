@@ -4,6 +4,9 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.string().regex(/^\d+$/).transform(Number).default('4000'),
 
+  // Base URL — the publicly reachable URL of this service (used by external servers)
+  BASE_URL: z.string().url().optional(),
+
   // Database
   DATABASE_URL: z.string().url(),
 
