@@ -25,6 +25,11 @@ export const config = {
     url: env.SUPERADMIN_URL,
   },
 
+  voiceAi: {
+    apiUrl: env.VOICE_AI_API_URL ?? env.BASE_URL ?? `http://localhost:${env.PORT}`,
+    apiKey: env.VOICE_AI_API_KEY ?? '',
+  },
+
   providers: {
     omnidim: {
       apiUrl: env.OMNIDIM_API_URL,

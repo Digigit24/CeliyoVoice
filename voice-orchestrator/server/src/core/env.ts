@@ -7,6 +7,10 @@ const envSchema = z.object({
   // Base URL — the publicly reachable URL of this service (used by external servers)
   BASE_URL: z.string().url().optional(),
 
+  // Voice AI service credentials — used by external servers to connect to this service
+  VOICE_AI_API_URL: z.string().url().optional(),
+  VOICE_AI_API_KEY: z.string().min(1).optional(),
+
   // Database
   DATABASE_URL: z.string().url(),
 

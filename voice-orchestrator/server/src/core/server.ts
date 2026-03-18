@@ -8,6 +8,7 @@ import { globalErrorHandler } from '../api/middleware/errorHandler';
 import { apiRouter } from '../api/routes/index';
 import { webhookRouter } from '../api/routes/webhooks.routes';
 import { jwtMiddleware } from '../common/jwtMiddleware';
+import { apiKeyMiddleware } from '../common/apiKeyMiddleware';
 
 export function createApp(): Application {
   const app = express();
@@ -46,6 +47,7 @@ export function createApp(): Application {
       timestamp: new Date().toISOString(),
       version: process.env['npm_package_version'] ?? '1.0.0',
       baseUrl: config.baseUrl,
+      voiceAiApiUrl: config.voiceAi.apiUrl,
     });
   });
 
@@ -53,8 +55,15 @@ export function createApp(): Application {
   // Signature verification is handled inside webhook.service.ts
   app.use('/webhooks', webhookRouter);
 
-  // ── JWT authentication (skips public paths internally) ────────────────────
-  app.use(jwtMiddleware);
+  // ── API key authentication (service-to-service) ──────────────────────────
+  // If x-api-key is present and valid, marks req.isServiceAuth = true and skips JWT.
+  app.use(apiKeyMiddleware);
+
+  // ── JWT authentication (skips public paths and API-key-authed requests) ──
+  app.use((req, res, next) => {
+    if (req.isServiceAuth) return next();
+    return jwtMiddleware(req, res, next);
+  });
 
   // ── API routes ─────────────────────────────────────────────────────────────
   app.use('/api/v1', apiRouter);

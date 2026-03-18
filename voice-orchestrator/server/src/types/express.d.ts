@@ -29,6 +29,8 @@ declare global {
       prisma?: PrismaClient;
       /** Permission scope resolved by requirePermission() middleware. */
       permissionScope?: PermissionScope;
+      /** True when the request was authenticated via x-api-key (service-to-service). */
+      isServiceAuth?: boolean;
     }
   }
 }
