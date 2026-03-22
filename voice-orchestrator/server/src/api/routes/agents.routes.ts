@@ -23,6 +23,13 @@ import {
   getWebhookUrl,
 } from '../../postCall/postCallAction.controller';
 import { chatWithAgent } from '../../chat/chat.controller';
+import {
+  attachTool,
+  listAgentTools,
+  updateAgentTool,
+  detachTool,
+  bulkAttachTools,
+} from '../../tools/agentTool.controller';
 
 export const agentRouter = Router();
 
@@ -48,6 +55,13 @@ agentRouter.post('/:id/sync', requirePermission('voiceai.agents.edit'), syncAgen
 
 // ── Chat route ───────────────────────────────────────────────────────────────
 agentRouter.post('/:id/chat', requirePermission('voiceai.agents.execute'), chatWithAgent);
+
+// ── Agent-Tool junction routes ───────────────────────────────────────────────
+agentRouter.post('/:id/tools/bulk', requirePermission('voiceai.tools.edit'), bulkAttachTools);
+agentRouter.post('/:id/tools', requirePermission('voiceai.tools.edit'), attachTool);
+agentRouter.get('/:id/tools', requirePermission('voiceai.tools.view'), listAgentTools);
+agentRouter.put('/:id/tools/:toolId', requirePermission('voiceai.tools.edit'), updateAgentTool);
+agentRouter.delete('/:id/tools/:toolId', requirePermission('voiceai.tools.edit'), detachTool);
 
 // ── Post-call action routes (must come before /:id to avoid conflicts) ────────
 // Static sub-routes first

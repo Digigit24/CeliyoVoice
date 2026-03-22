@@ -12,6 +12,7 @@ import Calls from './pages/Calls';
 import Tools from './pages/Tools';
 import Settings from './pages/Settings';
 import Conversations from './pages/Conversations';
+import McpConfig from './pages/McpConfig';
 import DevTools from './pages/DevTools';
 
 const queryClient = new QueryClient({
@@ -45,6 +46,7 @@ export default function App() {
               <Route path="/calls" element={<Calls />} />
               <Route path="/tools" element={<Tools />} />
               <Route path="/conversations" element={<Conversations />} />
+              <Route path="/mcp" element={<McpConfig />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/dev" element={<DevTools />} />
             </Route>

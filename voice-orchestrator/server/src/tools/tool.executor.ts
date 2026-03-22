@@ -1,13 +1,23 @@
 import axios from 'axios';
-import type { PrismaClient, HttpMethod, ToolAuthType } from '@prisma/client';
+import type { PrismaClient, HttpMethod, ToolAuthType, Tool } from '@prisma/client';
 import { getToolById } from './tool.registry';
-import { logger } from '../utils/logger';
+import { getBuiltInFunction } from './functions';
+import { createChildLogger } from '../utils/logger';
 
-export interface CallContext {
-  callId: string;
+const log = createChildLogger({ component: 'tool-executor' });
+
+export interface ExecutionContext {
   tenantId: string;
-  providerCallId: string;
+  // Voice context (optional)
+  callId?: string;
+  providerCallId?: string;
+  // Chat context (optional)
+  conversationId?: string;
+  agentId?: string;
 }
+
+/** Backward-compatible alias for the voice tool worker */
+export type CallContext = ExecutionContext;
 
 /**
  * Interpolates {{variableName}} placeholders in a value with inputData.
@@ -55,17 +65,11 @@ export class ToolExecutor {
   constructor(private readonly prisma: PrismaClient) {}
 
   /**
-   * Executes a tool HTTP call.
-   *
-   * 1. Fetches tool definition from DB (via registry cache).
-   * 2. Builds the request headers (including auth).
-   * 3. Interpolates the body template with input data.
-   * 4. Makes the HTTP request with timeout + retries.
-   * 5. Returns the response data.
+   * Executes a tool by type — routes to the appropriate executor.
    */
   async executeTool(
     toolId: string,
-    context: CallContext,
+    context: ExecutionContext,
     inputData: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
     const tool = await getToolById(toolId, context.tenantId, this.prisma);
@@ -73,12 +77,42 @@ export class ToolExecutor {
       throw new Error(`Tool ${toolId} not found for tenant ${context.tenantId}`);
     }
 
+    const toolType = (tool as Tool & { toolType?: string }).toolType ?? 'HTTP';
+
+    switch (toolType) {
+      case 'HTTP':
+        return this.executeHttpTool(tool, context, inputData);
+      case 'FUNCTION':
+        return this.executeFunctionTool(tool, context, inputData);
+      case 'COMPOSITE':
+        throw new Error('Composite tools not yet supported');
+      default:
+        return this.executeHttpTool(tool, context, inputData);
+    }
+  }
+
+  /**
+   * Executes an HTTP tool call (the original implementation).
+   */
+  private async executeHttpTool(
+    tool: Tool,
+    context: ExecutionContext,
+    inputData: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    if (!tool.endpoint) {
+      throw new Error(`HTTP tool "${tool.name}" has no endpoint configured`);
+    }
+
     const interpolationData = {
       ...inputData,
-      callId: context.callId,
+      ...(context.callId ? { callId: context.callId } : {}),
       tenantId: context.tenantId,
-      providerCallId: context.providerCallId,
+      ...(context.providerCallId ? { providerCallId: context.providerCallId } : {}),
+      ...(context.conversationId ? { conversationId: context.conversationId } : {}),
+      ...(context.agentId ? { agentId: context.agentId } : {}),
     };
+
+    const endpoint = interpolate(tool.endpoint, interpolationData) as string;
 
     const body = tool.bodyTemplate
       ? interpolate(tool.bodyTemplate, interpolationData)
@@ -102,7 +136,7 @@ export class ToolExecutor {
       try {
         const response = await axios({
           method: tool.method as HttpMethod,
-          url: tool.endpoint,
+          url: endpoint,
           headers: requestHeaders,
           data: ['GET', 'DELETE'].includes(tool.method) ? undefined : body,
           params: ['GET'].includes(tool.method) ? (body as Record<string, unknown>) : undefined,
@@ -114,9 +148,9 @@ export class ToolExecutor {
           throw new Error(`Tool responded with ${response.status}: ${JSON.stringify(response.data)}`);
         }
 
-        logger.debug(
-          { toolId, toolName: tool.name, status: response.status, attempt },
-          'Tool executed',
+        log.debug(
+          { toolId: tool.id, toolName: tool.name, status: response.status, attempt },
+          'HTTP tool executed',
         );
 
         return response.data as Record<string, unknown>;
@@ -125,12 +159,34 @@ export class ToolExecutor {
 
         if (attempt < maxAttempts) {
           const delay = 500 * attempt;
-          logger.warn({ toolId, attempt, delay, err: lastError.message }, 'Tool retry');
+          log.warn({ toolId: tool.id, attempt, delay, err: lastError.message }, 'Tool retry');
           await new Promise((resolve) => setTimeout(resolve, delay));
         }
       }
     }
 
     throw lastError ?? new Error('Tool execution failed after retries');
+  }
+
+  /**
+   * Executes a FUNCTION type tool using the built-in function registry.
+   */
+  private async executeFunctionTool(
+    tool: Tool,
+    context: ExecutionContext,
+    inputData: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const functionName = (tool as Tool & { functionName?: string }).functionName;
+    if (!functionName) {
+      throw new Error(`Function tool "${tool.name}" has no functionName configured`);
+    }
+
+    const fn = getBuiltInFunction(functionName);
+    if (!fn) {
+      throw new Error(`Built-in function "${functionName}" not registered`);
+    }
+
+    log.debug({ toolId: tool.id, toolName: tool.name, functionName }, 'Executing function tool');
+    return fn(inputData, context);
   }
 }

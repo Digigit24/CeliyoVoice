@@ -7,6 +7,7 @@ import { httpLogger } from '../utils/logger';
 import { globalErrorHandler } from '../api/middleware/errorHandler';
 import { apiRouter } from '../api/routes/index';
 import { webhookRouter } from '../api/routes/webhooks.routes';
+import { mcpRouter } from '../mcp/mcp.routes';
 import { jwtMiddleware } from '../common/jwtMiddleware';
 
 export function createApp(): Application {
@@ -51,6 +52,9 @@ export function createApp(): Application {
   // ── Webhook endpoints (public — registered before JWT middleware) ──────────
   // Signature verification is handled inside webhook.service.ts
   app.use('/webhooks', webhookRouter);
+
+  // ── MCP endpoints (public — auth handled by mcp.auth.ts) ────────────────
+  app.use('/mcp', mcpRouter);
 
   // ── JWT authentication (skips public paths internally) ────────────────────
   app.use(jwtMiddleware);

@@ -14,6 +14,7 @@ export const PUBLIC_PATHS: readonly string[] = [
   '/static',
   '/webhooks',
   '/api/v1/auth/login',
+  '/mcp',
 ] as const;
 
 /** HTTP header names for tenant identification (mirrors SuperAdmin convention). */
@@ -37,6 +38,15 @@ export const ErrorCode = {
   RATE_LIMIT_EXCEEDED: 'RATE_LIMIT_EXCEEDED',
   MODULE_NOT_ENABLED: 'MODULE_NOT_ENABLED',
   TENANT_MISMATCH: 'TENANT_MISMATCH',
+  TOOL_IMPORT_ERROR: 'TOOL_IMPORT_ERROR',
+  TOOL_EXECUTION_ERROR: 'TOOL_EXECUTION_ERROR',
+  TOOL_NOT_FOUND: 'TOOL_NOT_FOUND',
+  TOOL_VALIDATION_ERROR: 'TOOL_VALIDATION_ERROR',
+  TOKEN_BUDGET_EXCEEDED: 'TOKEN_BUDGET_EXCEEDED',
+  MCP_AUTH_FAILED: 'MCP_AUTH_FAILED',
+  MCP_PROTOCOL_ERROR: 'MCP_PROTOCOL_ERROR',
+  MCP_TOOL_NOT_FOUND: 'MCP_TOOL_NOT_FOUND',
+  CREDENTIAL_NOT_FOUND: 'CREDENTIAL_NOT_FOUND',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

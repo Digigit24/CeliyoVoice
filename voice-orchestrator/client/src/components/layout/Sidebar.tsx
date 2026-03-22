@@ -11,6 +11,7 @@ import {
   Mic2,
   Code2,
   MessageSquare,
+  Plug,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -20,6 +21,7 @@ const navItems = [
   { to: '/calls', label: 'Calls', icon: Phone },
   { to: '/conversations', label: 'Conversations', icon: MessageSquare },
   { to: '/tools', label: 'Tools', icon: Wrench },
+  { to: '/mcp', label: 'MCP Server', icon: Plug },
   { to: '/settings', label: 'Settings', icon: Settings },
   { to: '/dev', label: 'Developer', icon: Code2 },
 ];
@@ -42,7 +44,7 @@ export function Sidebar() {
             <Mic2 className="h-4 w-4" />
           </div>
           {!collapsed && (
-            <span className="truncate text-sm font-semibold text-sidebar-foreground">CeliyoVoice</span>
+            <span className="truncate text-sm font-semibold text-sidebar-foreground">Celiyo</span>
           )}
         </div>
       </div>

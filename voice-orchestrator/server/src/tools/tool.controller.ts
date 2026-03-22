@@ -35,6 +35,9 @@ export const listTools: RequestHandler = async (req, res) => {
     limit: q.data.limit,
     search: q.data.search,
     isActive: q.data.isActive,
+    category: q.data.category,
+    toolType: q.data.toolType,
+    tags: q.data.tags,
   });
 
   return paginated(res, tools, total, q.data.page, q.data.limit);

@@ -103,8 +103,15 @@ enum MessageRole {
 
 enum ToolSource {
   MANUAL
+  CELIYO_IMPORT
   SWAGGER_IMPORT
   MCP_IMPORT
+}
+
+enum ToolType {
+  HTTP
+  FUNCTION
+  COMPOSITE
 }
 
 enum LLMProvider {
@@ -241,33 +248,46 @@ model Call {
 /// HTTP tool that can be invoked by an agent during a call or chat.
 /// tenantId is a plain string (UUID from JWT) — used to filter, not FK.
 model Tool {
-  id           String       @id @default(uuid())
-  tenantId     String
-  ownerUserId  String
-  name         String
-  description  String
-  endpoint     String
-  method       HttpMethod   @default(POST)
-  headers      Json         @default("{}")
-  bodyTemplate Json?
-  authType     ToolAuthType @default(NONE)
+  id              String       @id @default(uuid())
+  tenantId        String
+  ownerUserId     String
+  name            String
+  description     String
+  /// Tool type: HTTP (API call), FUNCTION (built-in), COMPOSITE (chained).
+  toolType        ToolType     @default(HTTP) @map("tool_type")
+  /// HTTP endpoint — required for HTTP tools, optional for FUNCTION/COMPOSITE.
+  endpoint        String?
+  method          HttpMethod   @default(POST)
+  headers         Json         @default("{}")
+  bodyTemplate    Json?
+  authType        ToolAuthType @default(NONE)
   /// Encrypted JSON containing auth credentials (API key, token, etc.).
-  authConfig   Json         @default("{}")
-  timeout      Int          @default(30)
-  retries      Int          @default(0)
-  isActive     Boolean      @default(true)
+  authConfig      Json         @default("{}")
+  timeout         Int          @default(30)
+  retries         Int          @default(0)
+  isActive        Boolean      @default(true)
   /// JSON Schema for tool input parameters (for LLM function calling).
-  inputSchema  Json?        @map("input_schema")
+  inputSchema     Json?        @map("input_schema")
   /// JSON Schema for expected output.
-  outputSchema Json?        @map("output_schema")
+  outputSchema    Json?        @map("output_schema")
   /// Grouping category (e.g. "CRM", "Billing", "Internal").
-  category     String?
+  category        String?
   /// How this tool was created.
-  source       ToolSource   @default(MANUAL)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  source          ToolSource   @default(MANUAL)
+  /// Built-in function name for FUNCTION type tools.
+  functionName    String?      @map("function_name")
+  /// Configuration for COMPOSITE type tools (tool chaining).
+  compositeConfig Json?        @map("composite_config")
+  /// Import metadata: whenToUse, responseMapping, collection name, etc.
+  importMeta      Json?        @map("import_meta")
+  /// Optional FK to shared credential. If set, overrides inline authType/authConfig.
+  credentialId    String?      @map("credential_id")
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
+  credential ToolCredential? @relation(fields: [credentialId], references: [id], onDelete: SetNull)
   agentTools AgentTool[]
+  tags       ToolTagAssignment[]
 
   @@index([tenantId])
   @@map("tools")
@@ -459,6 +479,73 @@ model LLMUsage {
   @@index([tenantId, createdAt])
   @@index([tenantId, agentId])
   @@map("llm_usage")
+}
+
+/// Shared credentials for tools — centralizes auth secrets.
+model ToolCredential {
+  id          String       @id @default(uuid())
+  tenantId    String
+  ownerUserId String
+  name        String
+  authType    ToolAuthType
+  /// AES-256-GCM encrypted auth config JSON.
+  authConfig  Json         @default("{}")
+  /// Which service/API this credential is for (display only).
+  service     String?
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  tools Tool[]
+
+  @@index([tenantId])
+  @@map("tool_credentials")
+}
+
+/// Tags for organizing tools.
+model ToolTag {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  color     String?
+  createdAt DateTime @default(now())
+
+  tools ToolTagAssignment[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("tool_tags")
+}
+
+/// Many-to-many assignment of tags to tools.
+model ToolTagAssignment {
+  id     String @id @default(uuid())
+  toolId String
+  tagId  String
+
+  tool Tool    @relation(fields: [toolId], references: [id], onDelete: Cascade)
+  tag  ToolTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([toolId, tagId])
+  @@map("tool_tag_assignments")
+}
+
+/// API keys for MCP server access.
+model McpApiKey {
+  id         String    @id @default(uuid())
+  tenantId   String
+  name       String
+  /// SHA-256 hash of the raw API key.
+  keyHash    String
+  /// Optional: restrict to a specific agent's tools.
+  agentId    String?
+  isActive   Boolean   @default(true)
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([tenantId])
+  @@index([keyHash])
+  @@map("mcp_api_keys")
 }
 
 /// Immutable audit trail. userId comes from JWT — no FK to a local user table.

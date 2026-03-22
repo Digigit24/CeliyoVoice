@@ -5,8 +5,8 @@ import { recordUsage } from '../llm/llmUsage.service';
 import type {
   LLMMessage,
   LLMChatResponse,
-  ToolDefinition,
 } from '../llm/interfaces/llmProvider.interface';
+import { getToolDefinitionsForAgent, executeToolCall } from '../tools/toolBridge';
 import { ConversationService } from './conversation.service';
 import { createChildLogger } from '../utils/logger';
 
@@ -92,7 +92,7 @@ export class ChatService {
     const llmMessages = await this.buildMessageHistory(agent, conversation.id);
 
     // 6. Load agent tools
-    const toolDefs = await this.loadAgentTools(agentId, tenantId);
+    const toolDefs = await getToolDefinitionsForAgent(agentId, tenantId, this.prisma);
 
     // 7. Resolve LLM provider
     const providerName = (agent.llmProvider ?? 'OPENAI') as LLMProviderEnum;
@@ -118,37 +118,142 @@ export class ChatService {
       throw Object.assign(new Error(errMsg), { statusCode: 502, code: 'LLM_PROVIDER_ERROR' });
     }
 
-    // 8. Call LLM
+    // 8. Tool-calling orchestration loop
     log.debug(
-      { agentId, conversationId: conversation.id, provider: providerName, messageCount: llmMessages.length },
-      'Calling LLM',
+      { agentId, conversationId: conversation.id, provider: providerName, messageCount: llmMessages.length, toolCount: toolDefs.length },
+      'Starting LLM call with tool loop',
     );
 
-    let finalResponse: LLMChatResponse;
-    try {
-      const response = await llmProvider.chat({
-        messages: llmMessages,
-        tools: toolDefs.length > 0 ? toolDefs : undefined,
-        model: agent.llmModel ?? undefined,
-        temperature: this.getTemperature(agent),
-        maxTokens: this.getMaxTokens(agent),
-      });
+    const MAX_ITERATIONS = 10;
+    let finalResponse: LLMChatResponse | null = null;
+    let totalUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
 
-      // 9. Handle tool calls (single round — execute tools and get final response)
-      finalResponse = response;
-      if (response.toolCalls.length > 0) {
-        finalResponse = await this.executeToolLoop(
-          llmMessages,
-          response,
-          toolDefs,
-          llmProvider,
-          agent,
-        );
+    try {
+      for (let i = 0; i < MAX_ITERATIONS; i++) {
+        const response = await llmProvider.chat({
+          messages: llmMessages,
+          tools: toolDefs.length > 0 ? toolDefs : undefined,
+          model: agent.llmModel ?? undefined,
+          temperature: this.getTemperature(agent),
+          maxTokens: this.getMaxTokens(agent),
+        });
+
+        totalUsage.inputTokens += response.usage.inputTokens;
+        totalUsage.outputTokens += response.usage.outputTokens;
+        totalUsage.totalTokens += response.usage.totalTokens;
+
+        // Done — LLM gave a text response
+        if (response.finishReason === 'stop' || response.finishReason === 'length') {
+          finalResponse = response;
+          break;
+        }
+
+        // Tool calls
+        if (response.finishReason === 'tool_calls' && response.toolCalls.length > 0) {
+          // Store assistant message with tool calls
+          await this.prisma.message.create({
+            data: {
+              tenantId,
+              conversationId: conversation.id,
+              role: 'TOOL_CALL',
+              content: response.content || '',
+              metadata: JSON.parse(JSON.stringify({
+                toolCalls: response.toolCalls.map((tc) => ({
+                  id: tc.id,
+                  name: tc.name,
+                  arguments: tc.arguments,
+                })),
+                iteration: i,
+              })),
+            },
+          });
+
+          // Add to LLM history
+          llmMessages.push({
+            role: 'assistant',
+            content: response.content || '',
+            toolCalls: response.toolCalls,
+          });
+
+          // Execute ALL calls in parallel
+          const results = await Promise.allSettled(
+            response.toolCalls.map((tc) =>
+              executeToolCall(tc, agentId, tenantId, this.prisma, { conversationId: conversation.id }),
+            ),
+          );
+
+          // Process each result
+          for (let j = 0; j < results.length; j++) {
+            const tc = response.toolCalls[j]!;
+            const r = results[j]!;
+            const toolResult = r.status === 'fulfilled'
+              ? r.value.result
+              : JSON.stringify({ error: r.reason?.message || 'Tool failed' });
+
+            log.info(
+              {
+                toolName: tc.name,
+                iteration: i,
+                success: r.status === 'fulfilled' && r.value.success,
+                durationMs: r.status === 'fulfilled' ? r.value.durationMs : 0,
+              },
+              'Tool call result',
+            );
+
+            // Store tool result
+            await this.prisma.message.create({
+              data: {
+                tenantId,
+                conversationId: conversation.id,
+                role: 'TOOL_RESULT',
+                content: toolResult,
+                toolCallId: tc.id,
+                toolName: tc.name,
+                metadata: {
+                  isError: r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.success),
+                  iteration: i,
+                },
+              },
+            });
+
+            // Add to LLM history
+            llmMessages.push({
+              role: 'tool',
+              content: toolResult,
+              toolCallId: tc.id,
+            });
+          }
+
+          continue; // Loop back for next LLM call
+        }
+
+        // Unknown finish reason — treat as done
+        finalResponse = response;
+        break;
       }
+
+      // Safety: exhausted iterations
+      if (!finalResponse) {
+        llmMessages.push({
+          role: 'system',
+          content: 'Maximum tool calls reached. Provide your final response now.',
+        });
+        finalResponse = await llmProvider.chat({
+          messages: llmMessages,
+          model: agent.llmModel ?? undefined,
+          temperature: this.getTemperature(agent),
+          maxTokens: this.getMaxTokens(agent),
+        });
+        totalUsage.inputTokens += finalResponse.usage.inputTokens;
+        totalUsage.outputTokens += finalResponse.usage.outputTokens;
+        totalUsage.totalTokens += finalResponse.usage.totalTokens;
+      }
+
+      // Override usage with accumulated totals
+      finalResponse = { ...finalResponse, usage: totalUsage };
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'LLM call failed';
-      log.error({ err, agentId, conversationId: conversation.id }, 'LLM call error');
-      // Save error as assistant message
+      log.error({ err, agentId, conversationId: conversation.id }, 'LLM/tool loop error');
       await this.prisma.message.create({
         data: {
           tenantId,
@@ -257,7 +362,7 @@ export class ChatService {
     const llmMessages = await this.buildMessageHistory(agent, conversation.id);
 
     // 6. Load agent tools
-    const toolDefs = await this.loadAgentTools(agentId, tenantId);
+    const toolDefs = await getToolDefinitionsForAgent(agentId, tenantId, this.prisma);
 
     // 7. Resolve LLM provider
     const providerName = (agent.llmProvider ?? 'OPENAI') as LLMProviderEnum;
@@ -279,6 +384,10 @@ export class ChatService {
     };
 
     // 9. Stream LLM response
+    // TODO: Streaming tool calls — currently tool calls from stream are reported but not executed.
+    // The non-streaming path (handleMessage) fully supports multi-round tool execution.
+    // To add streaming tool support: collect tool calls from stream events, execute between iterations,
+    // send SSE events for tool_calls and tool_results, then resume streaming.
     let fullContent = '';
     let usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
     let finishReason = 'stop';
@@ -468,27 +577,6 @@ export class ChatService {
     }
   }
 
-  private async loadAgentTools(agentId: string, tenantId: string): Promise<ToolDefinition[]> {
-    const agentTools = await this.prisma.agentTool.findMany({
-      where: { agentId, tenantId },
-      include: { tool: true },
-      orderBy: { priority: 'asc' },
-    });
-
-    return agentTools
-      .filter((at) => at.tool.isActive)
-      .map((at) => ({
-        name: at.tool.name,
-        description: at.whenToUse
-          ? `${at.tool.description}\n\nWhen to use: ${at.whenToUse}`
-          : at.tool.description,
-        inputSchema: (at.tool.inputSchema as Record<string, unknown>) ?? {
-          type: 'object',
-          properties: {},
-        },
-      }));
-  }
-
   private getTemperature(agent: Agent): number | undefined {
     const tc = agent.typeConfig as Record<string, unknown> | null;
     if (tc && typeof tc.temperature === 'number') return tc.temperature;
@@ -501,52 +589,4 @@ export class ChatService {
     return undefined;
   }
 
-  /**
-   * Simple single-round tool execution loop.
-   * Executes tool calls, feeds results back to LLM, returns final response.
-   */
-  private async executeToolLoop(
-    messages: LLMMessage[],
-    firstResponse: LLMChatResponse,
-    toolDefs: ToolDefinition[],
-    llmProvider: { chat: (req: { messages: LLMMessage[]; tools?: ToolDefinition[]; model?: string; temperature?: number; maxTokens?: number }) => Promise<LLMChatResponse> },
-    agent: Agent,
-    maxRounds = 5,
-  ): Promise<LLMChatResponse> {
-    let currentResponse = firstResponse;
-    const currentMessages = [...messages];
-
-    for (let round = 0; round < maxRounds; round++) {
-      if (currentResponse.toolCalls.length === 0) break;
-
-      // Add assistant message with tool calls
-      currentMessages.push({
-        role: 'assistant',
-        content: currentResponse.content ?? '',
-        toolCalls: currentResponse.toolCalls,
-      });
-
-      // Execute each tool call (placeholder — tools are HTTP endpoints, would need HTTP execution)
-      for (const tc of currentResponse.toolCalls) {
-        log.info({ toolName: tc.name, toolCallId: tc.id }, 'Tool call requested (stub)');
-        // TODO: Actually execute the HTTP tool using the Tool model's endpoint/auth config
-        currentMessages.push({
-          role: 'tool',
-          content: JSON.stringify({ status: 'error', message: 'Tool execution not yet implemented' }),
-          toolCallId: tc.id,
-        });
-      }
-
-      // Call LLM again with tool results
-      currentResponse = await llmProvider.chat({
-        messages: currentMessages,
-        tools: toolDefs,
-        model: agent.llmModel ?? undefined,
-        temperature: this.getTemperature(agent),
-        maxTokens: this.getMaxTokens(agent),
-      });
-    }
-
-    return currentResponse;
-  }
 }

@@ -3,7 +3,10 @@ import { z } from 'zod';
 export const CreateToolSchema = z.object({
   name: z.string().min(1).max(255),
   description: z.string().min(1),
-  endpoint: z.string().url('Must be a valid URL'),
+  toolType: z.enum(['HTTP', 'FUNCTION', 'COMPOSITE']).default('HTTP'),
+
+  // HTTP fields
+  endpoint: z.string().optional(),
   method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).default('POST'),
   headers: z.record(z.string()).default({}),
   bodyTemplate: z.record(z.unknown()).optional(),
@@ -11,13 +14,39 @@ export const CreateToolSchema = z.object({
   authConfig: z.record(z.unknown()).default({}),
   timeout: z.number().int().min(1).max(120).default(30),
   retries: z.number().int().min(0).max(3).default(0),
+
+  // Function fields
+  functionName: z.string().optional(),
+
+  // Schema fields
   inputSchema: z.record(z.unknown()).optional(),
   outputSchema: z.record(z.unknown()).optional(),
   category: z.string().max(100).optional(),
-  source: z.enum(['MANUAL', 'SWAGGER_IMPORT', 'MCP_IMPORT']).optional().default('MANUAL'),
-});
+  source: z.enum(['MANUAL', 'CELIYO_IMPORT', 'SWAGGER_IMPORT', 'MCP_IMPORT']).optional().default('MANUAL'),
+}).refine((data) => {
+  if (data.toolType === 'HTTP' && !data.endpoint) return false;
+  if (data.toolType === 'FUNCTION' && !data.functionName) return false;
+  return true;
+}, { message: 'HTTP tools require endpoint. FUNCTION tools require functionName.' });
 
-export const UpdateToolSchema = CreateToolSchema.partial();
+export const UpdateToolSchema = z.object({
+  name: z.string().min(1).max(255).optional(),
+  description: z.string().min(1).optional(),
+  toolType: z.enum(['HTTP', 'FUNCTION', 'COMPOSITE']).optional(),
+  endpoint: z.string().optional().nullable(),
+  method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).optional(),
+  headers: z.record(z.string()).optional(),
+  bodyTemplate: z.record(z.unknown()).optional().nullable(),
+  authType: z.enum(['NONE', 'API_KEY', 'BEARER', 'OAUTH']).optional(),
+  authConfig: z.record(z.unknown()).optional(),
+  timeout: z.number().int().min(1).max(120).optional(),
+  retries: z.number().int().min(0).max(3).optional(),
+  functionName: z.string().optional().nullable(),
+  inputSchema: z.record(z.unknown()).optional().nullable(),
+  outputSchema: z.record(z.unknown()).optional().nullable(),
+  category: z.string().max(100).optional().nullable(),
+  isActive: z.boolean().optional(),
+});
 
 export const ListToolsQuerySchema = z.object({
   page: z.string().optional().transform((v) => Math.max(1, parseInt(v ?? '1', 10) || 1)),
@@ -27,6 +56,10 @@ export const ListToolsQuerySchema = z.object({
     .string()
     .optional()
     .transform((v) => (v === 'true' ? true : v === 'false' ? false : undefined)),
+  category: z.string().optional(),
+  toolType: z.enum(['HTTP', 'FUNCTION', 'COMPOSITE']).optional(),
+  tags: z.string().optional(), // comma-separated tag IDs
+  source: z.enum(['MANUAL', 'CELIYO_IMPORT', 'SWAGGER_IMPORT', 'MCP_IMPORT']).optional(),
 });
 
 export type CreateToolInput = z.infer<typeof CreateToolSchema>;
