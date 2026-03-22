@@ -24,6 +24,14 @@ const envSchema = z.object({
   BOLNA_API_URL: z.string().url().default('https://api.bolna.ai'),
   BOLNA_API_KEY: z.string().default(''),
 
+  // LLM provider fallback credentials (used if tenant has no custom LLM credentials)
+  LLM_OPENAI_API_KEY: z.string().default(''),
+  LLM_OPENAI_API_URL: z.string().url().default('https://api.openai.com/v1'),
+  LLM_ANTHROPIC_API_KEY: z.string().default(''),
+  LLM_ANTHROPIC_API_URL: z.string().url().default('https://api.anthropic.com'),
+  LLM_GOOGLE_API_KEY: z.string().default(''),
+  LLM_GOOGLE_API_URL: z.string().url().default('https://generativelanguage.googleapis.com'),
+
   // Encryption — must be exactly 64 hex chars (32 bytes)
   ENCRYPTION_KEY: z.string().length(64),
 

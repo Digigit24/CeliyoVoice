@@ -1,4 +1,4 @@
-import type { PrismaClient, Agent, VoiceProvider } from '@prisma/client';
+import type { PrismaClient, Agent, VoiceProvider, AgentType } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import { getProvider } from '../providers/providerRouter';
 import { logger } from '../utils/logger';
@@ -13,6 +13,7 @@ export interface AgentListOptions {
   page: number;
   limit: number;
   provider?: VoiceProvider;
+  agentType?: AgentType;
   isActive?: boolean;
   search?: string;
   sortBy: string;
@@ -28,12 +29,18 @@ export class AgentService {
     input: CreateAgentInput,
   ): Promise<{ agent: Agent; warning?: string }> {
     // Save agent to local DB first
+    const agentType = (input.agentType ?? 'VOICE') as AgentType;
+
     const agent = await this.prisma.agent.create({
       data: {
         tenantId,
         ownerUserId,
         name: input.name,
-        provider: input.provider as VoiceProvider,
+        agentType,
+        typeConfig: input.typeConfig ? (input.typeConfig as Prisma.InputJsonValue) : {},
+        llmProvider: input.llmProvider,
+        llmModel: input.llmModel,
+        provider: (input.provider ?? 'OMNIDIM') as VoiceProvider,
         voiceLanguage: input.voiceLanguage,
         voiceModel: input.voiceModel,
         systemPrompt: input.systemPrompt,
@@ -45,9 +52,14 @@ export class AgentService {
       },
     });
 
+    // Chat-only agents don't need provider sync
+    if (agentType === 'CHAT') {
+      return { agent };
+    }
+
     // Sync to provider — if it fails, the agent is still saved locally
     try {
-      const adapter = await getProvider(input.provider as VoiceProvider, tenantId, this.prisma);
+      const adapter = await getProvider((input.provider ?? 'OMNIDIM') as VoiceProvider, tenantId, this.prisma);
       const result = await adapter.createAgent({
         name: input.name,
         voiceLanguage: input.voiceLanguage,
@@ -79,6 +91,7 @@ export class AgentService {
     const where: Prisma.AgentWhereInput = {
       tenantId: opts.tenantId,
       ...(opts.provider ? { provider: opts.provider } : {}),
+      ...(opts.agentType ? { agentType: opts.agentType } : {}),
       ...(opts.isActive !== undefined ? { isActive: opts.isActive } : {}),
       ...(opts.search
         ? { name: { contains: opts.search, mode: 'insensitive' as Prisma.QueryMode } }
@@ -153,6 +166,10 @@ export class AgentService {
       where: { id },
       data: {
         ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.agentType !== undefined ? { agentType: input.agentType as AgentType } : {}),
+        ...(input.typeConfig !== undefined ? { typeConfig: input.typeConfig as Prisma.InputJsonValue } : {}),
+        ...(input.llmProvider !== undefined ? { llmProvider: input.llmProvider } : {}),
+        ...(input.llmModel !== undefined ? { llmModel: input.llmModel } : {}),
         ...(input.voiceLanguage !== undefined ? { voiceLanguage: input.voiceLanguage } : {}),
         ...(input.voiceModel !== undefined ? { voiceModel: input.voiceModel } : {}),
         ...(input.systemPrompt !== undefined ? { systemPrompt: input.systemPrompt } : {}),

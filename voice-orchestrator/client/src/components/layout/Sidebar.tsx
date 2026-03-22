@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Mic2,
   Code2,
+  MessageSquare,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -17,6 +18,7 @@ const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/agents', label: 'Agents', icon: Bot },
   { to: '/calls', label: 'Calls', icon: Phone },
+  { to: '/conversations', label: 'Conversations', icon: MessageSquare },
   { to: '/tools', label: 'Tools', icon: Wrench },
   { to: '/settings', label: 'Settings', icon: Settings },
   { to: '/dev', label: 'Developer', icon: Code2 },

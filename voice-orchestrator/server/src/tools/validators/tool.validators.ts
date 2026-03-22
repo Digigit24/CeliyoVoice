@@ -11,6 +11,10 @@ export const CreateToolSchema = z.object({
   authConfig: z.record(z.unknown()).default({}),
   timeout: z.number().int().min(1).max(120).default(30),
   retries: z.number().int().min(0).max(3).default(0),
+  inputSchema: z.record(z.unknown()).optional(),
+  outputSchema: z.record(z.unknown()).optional(),
+  category: z.string().max(100).optional(),
+  source: z.enum(['MANUAL', 'SWAGGER_IMPORT', 'MCP_IMPORT']).optional().default('MANUAL'),
 });
 
 export const UpdateToolSchema = CreateToolSchema.partial();

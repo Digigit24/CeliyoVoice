@@ -19,7 +19,6 @@ import {
   ChevronRight,
   MessageSquare,
   Languages,
-  Zap,
   PhoneOff,
   PhoneForwarded,
   Variable,
@@ -54,6 +53,8 @@ import {
 import { toast } from '@/hooks/useToast';
 import { useAgent, useUpdateAgent, useDeleteAgent, useSyncAgentById } from '@/hooks/useAgentDetail';
 import { api } from '@/lib/axios';
+import { ChatPlayground } from '@/components/chat/ChatPlayground';
+import { AgentToolsTab } from '@/components/agents/AgentToolsTab';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -261,6 +262,20 @@ const PROVIDER_COLORS: Record<string, string> = {
   BOLNA: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
 };
 
+// ── LLM model options (shared constant) ──────────────────────────────────────
+
+const LLM_MODELS: Record<string, string[]> = {
+  OPENAI: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'],
+  ANTHROPIC: ['claude-sonnet-4-20250514', 'claude-haiku-4-5-20251001'],
+  GOOGLE: [
+    'gemini-2.5-pro',
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-lite',
+  ],
+};
+
 // ── Overview tab ──────────────────────────────────────────────────────────────
 
 function OverviewTab({ agentId }: { agentId: string }) {
@@ -269,8 +284,11 @@ function OverviewTab({ agentId }: { agentId: string }) {
 
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [editingWelcome, setEditingWelcome] = useState(false);
+  const [editingLlm, setEditingLlm] = useState(false);
   const [promptDraft, setPromptDraft] = useState('');
   const [welcomeDraft, setWelcomeDraft] = useState('');
+  const [llmProviderDraft, setLlmProviderDraft] = useState('');
+  const [llmModelDraft, setLlmModelDraft] = useState('');
 
   if (isLoading || !agent) {
     return (
@@ -279,6 +297,13 @@ function OverviewTab({ agentId }: { agentId: string }) {
       </div>
     );
   }
+
+  const agentType = (agent as unknown as { agentType?: string }).agentType ?? 'VOICE';
+  const isChatCapable = agentType === 'CHAT' || agentType === 'HYBRID';
+  const isVoiceCapable = agentType === 'VOICE' || agentType === 'HYBRID';
+  const agentLlmProvider = (agent as unknown as { llmProvider?: string | null }).llmProvider;
+  const agentLlmModel = (agent as unknown as { llmModel?: string | null }).llmModel;
+  const typeConfig = (agent as unknown as { typeConfig?: Record<string, unknown> }).typeConfig ?? {};
 
   const rawCfg = agent.providerConfig as OmnidimConfig | BolnaConfig | null;
   const cfg = isBolnaConfig(rawCfg) ? null : rawCfg as OmnidimConfig | null;
@@ -305,44 +330,74 @@ function OverviewTab({ agentId }: { agentId: string }) {
     }
   };
 
+  const handleSaveLlm = async () => {
+    try {
+      await updateMutation.mutateAsync({
+        llmProvider: llmProviderDraft,
+        llmModel: llmModelDraft,
+      });
+      setEditingLlm(false);
+      toast({ title: 'LLM configuration updated' });
+    } catch {
+      toast({ variant: 'destructive', title: 'Failed to update LLM configuration' });
+    }
+  };
+
+  const openEditLlm = () => {
+    setLlmProviderDraft(agentLlmProvider ?? 'OPENAI');
+    setLlmModelDraft(agentLlmModel ?? '');
+    setEditingLlm(true);
+  };
+
   return (
     <div className="grid gap-4 md:grid-cols-2">
       {/* Basic Info */}
       <Card>
         <CardHeader><CardTitle className="text-sm">Basic Info</CardTitle></CardHeader>
         <CardContent className="divide-y divide-border/50 text-sm">
-          <InfoRow label="Provider" value={
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${PROVIDER_COLORS[agent.provider] ?? 'bg-muted'}`}>
-              {agent.provider}
-            </span>
-          } />
-          {agent.providerAgentId && (
-            <InfoRow label="Provider ID" value={
-              <span className="flex items-center font-mono text-xs">
-                {agent.providerAgentId}
-                <CopyButton text={agent.providerAgentId} />
-              </span>
-            } />
-          )}
-          <InfoRow label="Language" value={agent.voiceLanguage} />
-          <InfoRow label="Voice" value={
-            cfg?.voice_name
-              ?? bolnaTask?.tools_config?.synthesizer?.provider_config?.voice
-              ?? agent.voiceModel
-          } />
-          <InfoRow label="Voice Provider" value={
-            cfg?.voice_provider
-              ?? bolnaTask?.tools_config?.synthesizer?.provider
-          } />
-          <InfoRow label="Call Type" value={
+          <InfoRow label="Agent Type" value={
             <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-              (agent.callType ?? 'Incoming') === 'Outgoing'
-                ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-                : 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400'
+              agentType === 'CHAT'
+                ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
+                : agentType === 'HYBRID'
+                  ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400'
+                  : 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
             }`}>
-              {agent.callType ?? 'Incoming'}
+              {agentType}
             </span>
           } />
+          {isVoiceCapable && (
+            <>
+              <InfoRow label="Voice Provider" value={
+                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${PROVIDER_COLORS[agent.provider] ?? 'bg-muted'}`}>
+                  {agent.provider}
+                </span>
+              } />
+              {agent.providerAgentId && (
+                <InfoRow label="Provider ID" value={
+                  <span className="flex items-center font-mono text-xs">
+                    {agent.providerAgentId}
+                    <CopyButton text={agent.providerAgentId} />
+                  </span>
+                } />
+              )}
+              <InfoRow label="Language" value={agent.voiceLanguage} />
+              <InfoRow label="Voice" value={
+                cfg?.voice_name
+                  ?? bolnaTask?.tools_config?.synthesizer?.provider_config?.voice
+                  ?? agent.voiceModel
+              } />
+              <InfoRow label="Call Type" value={
+                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                  (agent.callType ?? 'Incoming') === 'Outgoing'
+                    ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                    : 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400'
+                }`}>
+                  {agent.callType ?? 'Incoming'}
+                </span>
+              } />
+            </>
+          )}
           <Separator className="my-1" />
           <InfoRow label="Created" value={<span className="text-xs">{formatDate(agent.createdAt)}</span>} />
           <InfoRow label="Updated" value={<span className="text-xs">{formatDate(agent.updatedAt)}</span>} />
@@ -352,14 +407,57 @@ function OverviewTab({ agentId }: { agentId: string }) {
         </CardContent>
       </Card>
 
-      {/* Quick Stats */}
+      {/* LLM Configuration — only for CHAT/HYBRID */}
+      {isChatCapable && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <Brain className="h-4 w-4 text-muted-foreground" />
+                LLM Configuration
+              </CardTitle>
+              <Button variant="outline" size="sm" onClick={openEditLlm}>
+                <Pencil className="mr-1 h-3.5 w-3.5" />Edit
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="divide-y divide-border/50 text-sm">
+            <InfoRow label="LLM Provider" value={
+              <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
+                {agentLlmProvider ?? '—'}
+              </span>
+            } />
+            <InfoRow label="Model" value={
+              <span className="font-mono text-xs">{agentLlmModel ?? '—'}</span>
+            } />
+            {typeof typeConfig.temperature === 'number' && (
+              <InfoRow label="Temperature" value={typeConfig.temperature} />
+            )}
+            {typeof typeConfig.maxTokens === 'number' && (
+              <InfoRow label="Max Tokens" value={typeConfig.maxTokens} />
+            )}
+            {typeof typeConfig.streaming === 'boolean' && (
+              <InfoRow label="Streaming" value={<BoolBadge value={typeConfig.streaming} />} />
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Quick Stats — voice stats for VOICE/HYBRID, placeholder for CHAT */}
       <Card>
         <CardHeader><CardTitle className="text-sm">Quick Stats</CardTitle></CardHeader>
         <CardContent className="divide-y divide-border/50 text-sm">
-          <InfoRow label="Total Calls" value={<span className="font-semibold">{agent._count.calls}</span>} />
-          <InfoRow label="Successful Calls" value={agent.successfulCalls ?? 0} />
-          <InfoRow label="Avg Duration" value={formatDuration(agent.avgDuration)} />
-          <InfoRow label="Last Call" value={<span className="text-xs">{formatDate(agent.lastCallAt)}</span>} />
+          {isVoiceCapable && (
+            <>
+              <InfoRow label="Total Calls" value={<span className="font-semibold">{agent._count.calls}</span>} />
+              <InfoRow label="Successful Calls" value={agent.successfulCalls ?? 0} />
+              <InfoRow label="Avg Duration" value={formatDuration(agent.avgDuration)} />
+              <InfoRow label="Last Call" value={<span className="text-xs">{formatDate(agent.lastCallAt)}</span>} />
+            </>
+          )}
+          {!isVoiceCapable && (
+            <InfoRow label="Total Calls" value={<span className="text-xs text-muted-foreground">N/A (Chat agent)</span>} />
+          )}
           {cfg && (
             <>
               <Separator className="my-1" />
@@ -381,25 +479,27 @@ function OverviewTab({ agentId }: { agentId: string }) {
         </CardContent>
       </Card>
 
-      {/* Welcome Message */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <MessageSquare className="h-4 w-4 text-muted-foreground" />
-              Welcome Message
-            </CardTitle>
-            <Button variant="outline" size="sm" onClick={() => { setWelcomeDraft(agent.welcomeMessage ?? cfg?.welcome_message ?? ''); setEditingWelcome(true); }}>
-              <Pencil className="mr-1 h-3.5 w-3.5" />Edit
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">
-            {agent.welcomeMessage ?? cfg?.welcome_message ?? 'No welcome message set.'}
-          </p>
-        </CardContent>
-      </Card>
+      {/* Welcome Message — only for VOICE/HYBRID */}
+      {isVoiceCapable && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                Welcome Message
+              </CardTitle>
+              <Button variant="outline" size="sm" onClick={() => { setWelcomeDraft(agent.welcomeMessage ?? cfg?.welcome_message ?? ''); setEditingWelcome(true); }}>
+                <Pencil className="mr-1 h-3.5 w-3.5" />Edit
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              {agent.welcomeMessage ?? cfg?.welcome_message ?? 'No welcome message set.'}
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Languages */}
       {cfg?.languages && cfg.languages.length > 0 && (
@@ -431,7 +531,6 @@ function OverviewTab({ agentId }: { agentId: string }) {
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
-          {/* Context breakdown as readable sections if available */}
           {cfg?.context_breakdown && cfg.context_breakdown.length > 0 ? (
             cfg.context_breakdown
               .filter((cb) => cb.is_enabled !== false)
@@ -453,7 +552,7 @@ function OverviewTab({ agentId }: { agentId: string }) {
         </CardContent>
       </Card>
 
-      {/* Edit dialogs */}
+      {/* Edit System Prompt dialog */}
       <Dialog open={editingPrompt} onOpenChange={setEditingPrompt}>
         <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>Edit System Prompt</DialogTitle></DialogHeader>
@@ -467,6 +566,7 @@ function OverviewTab({ agentId }: { agentId: string }) {
         </DialogContent>
       </Dialog>
 
+      {/* Edit Welcome Message dialog */}
       <Dialog open={editingWelcome} onOpenChange={setEditingWelcome}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>Edit Welcome Message</DialogTitle></DialogHeader>
@@ -474,6 +574,49 @@ function OverviewTab({ agentId }: { agentId: string }) {
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingWelcome(false)}>Cancel</Button>
             <Button onClick={handleSaveWelcome} disabled={updateMutation.isPending}>
+              {updateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit LLM Configuration dialog */}
+      <Dialog open={editingLlm} onOpenChange={setEditingLlm}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit LLM Configuration</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>LLM Provider</Label>
+              <Select
+                value={llmProviderDraft}
+                onValueChange={(v) => {
+                  setLlmProviderDraft(v);
+                  setLlmModelDraft(LLM_MODELS[v]?.[0] ?? '');
+                }}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="OPENAI">OpenAI</SelectItem>
+                  <SelectItem value="ANTHROPIC">Anthropic</SelectItem>
+                  <SelectItem value="GOOGLE">Google Gemini</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Model</Label>
+              <Select value={llmModelDraft} onValueChange={setLlmModelDraft}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(LLM_MODELS[llmProviderDraft] ?? []).map((m) => (
+                    <SelectItem key={m} value={m}>{m}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingLlm(false)}>Cancel</Button>
+            <Button onClick={handleSaveLlm} disabled={updateMutation.isPending || !llmProviderDraft || !llmModelDraft}>
               {updateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
             </Button>
           </DialogFooter>
@@ -1345,17 +1488,7 @@ function PostCallTab({ agentId }: { agentId: string }) {
 
 // ── Tools tab ─────────────────────────────────────────────────────────────────
 
-function ToolsTab() {
-  return (
-    <div className="flex h-40 items-center justify-center rounded-md border border-dashed">
-      <div className="text-center">
-        <Zap className="mx-auto h-8 w-8 text-muted-foreground" />
-        <p className="mt-2 text-sm font-medium">No tools configured</p>
-        <p className="mt-1 text-xs text-muted-foreground">Tool assignment coming in a future update.</p>
-      </div>
-    </div>
-  );
-}
+// ToolsTab is now imported from AgentToolsTab component
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
@@ -1419,10 +1552,15 @@ export default function AgentDetail() {
   const bolnaPageCfg = isBolnaConfig(rawPageCfg) ? rawPageCfg : null;
   const bolnaLLM = bolnaPageCfg?.tasks?.[0]?.tools_config?.llm_agent?.llm_config?.model;
 
+  const agentType = (agent as unknown as { agentType?: string }).agentType ?? 'VOICE';
+  const isChatCapable = agentType === 'CHAT' || agentType === 'HYBRID';
+  const isVoiceCapable = agentType === 'VOICE' || agentType === 'HYBRID';
+  const llmModel = (agent as unknown as { llmModel?: string }).llmModel;
+
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col h-[calc(100vh-theme(spacing.14)-theme(spacing.12))] -m-6">
       {/* Top bar */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between shrink-0 px-6 pt-6 pb-3">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="sm" onClick={() => navigate('/agents')}>
             <ArrowLeft className="mr-1 h-4 w-4" />
@@ -1436,12 +1574,23 @@ export default function AgentDetail() {
             <div>
               <h1 className="text-lg font-semibold leading-none">{agent.name}</h1>
               <div className="mt-1 flex items-center gap-2">
-                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${providerColor}`}>
-                  {agent.provider}
+                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                  agentType === 'CHAT'
+                    ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
+                    : agentType === 'HYBRID'
+                      ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400'
+                      : 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                }`}>
+                  {agentType}
                 </span>
-                {(cfg?.llm_service ?? bolnaLLM) && (
+                {isVoiceCapable && (
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${providerColor}`}>
+                    {agent.provider}
+                  </span>
+                )}
+                {(llmModel ?? cfg?.llm_service ?? bolnaLLM) && (
                   <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground font-mono">
-                    {cfg?.llm_service ?? bolnaLLM}
+                    {llmModel ?? cfg?.llm_service ?? bolnaLLM}
                   </span>
                 )}
                 {agent.providerAgentId && (
@@ -1485,34 +1634,47 @@ export default function AgentDetail() {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="overview">
-        <TabsList>
+      <Tabs defaultValue="overview" className="flex flex-col flex-1 min-h-0 px-6">
+        <TabsList className="shrink-0">
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="config">Provider Config</TabsTrigger>
-          <TabsTrigger value="calls">Calls</TabsTrigger>
-          <TabsTrigger value="post-call">Post-Call</TabsTrigger>
+          {isChatCapable && <TabsTrigger value="chat">Chat Playground</TabsTrigger>}
+          {isVoiceCapable && <TabsTrigger value="config">Provider Config</TabsTrigger>}
+          {isVoiceCapable && <TabsTrigger value="calls">Calls</TabsTrigger>}
           <TabsTrigger value="tools">Tools</TabsTrigger>
+          {isVoiceCapable && <TabsTrigger value="post-call">Post-Call</TabsTrigger>}
         </TabsList>
 
-        <TabsContent value="overview" className="mt-4">
+        <TabsContent value="overview" className="mt-4 flex-1 overflow-y-auto pb-6">
           <OverviewTab agentId={id!} />
         </TabsContent>
 
-        <TabsContent value="config" className="mt-4">
-          <ProviderConfigTab agentId={id!} />
+        {isChatCapable && (
+          <TabsContent value="chat" className="mt-4 flex-1 min-h-0">
+            <ChatPlayground agentId={id!} />
+          </TabsContent>
+        )}
+
+        {isVoiceCapable && (
+          <TabsContent value="config" className="mt-4 flex-1 overflow-y-auto pb-6">
+            <ProviderConfigTab agentId={id!} />
+          </TabsContent>
+        )}
+
+        {isVoiceCapable && (
+          <TabsContent value="calls" className="mt-4 flex-1 overflow-y-auto pb-6">
+            <CallsTab agentId={id!} />
+          </TabsContent>
+        )}
+
+        <TabsContent value="tools" className="mt-4 flex-1 overflow-y-auto pb-6">
+          <AgentToolsTab agentId={id!} />
         </TabsContent>
 
-        <TabsContent value="calls" className="mt-4">
-          <CallsTab agentId={id!} />
-        </TabsContent>
-
-        <TabsContent value="post-call" className="mt-4">
-          <PostCallTab agentId={id!} />
-        </TabsContent>
-
-        <TabsContent value="tools" className="mt-4">
-          <ToolsTab />
-        </TabsContent>
+        {isVoiceCapable && (
+          <TabsContent value="post-call" className="mt-4 flex-1 overflow-y-auto pb-6">
+            <PostCallTab agentId={id!} />
+          </TabsContent>
+        )}
       </Tabs>
 
       {/* Delete confirmation */}

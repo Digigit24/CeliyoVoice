@@ -22,6 +22,7 @@ import {
   listExecutions,
   getWebhookUrl,
 } from '../../postCall/postCallAction.controller';
+import { chatWithAgent } from '../../chat/chat.controller';
 
 export const agentRouter = Router();
 
@@ -44,6 +45,9 @@ agentRouter.delete('/:id', requirePermission('voiceai.agents.delete'), deleteAge
 
 // ── Sync route ────────────────────────────────────────────────────────────────
 agentRouter.post('/:id/sync', requirePermission('voiceai.agents.edit'), syncAgent);
+
+// ── Chat route ───────────────────────────────────────────────────────────────
+agentRouter.post('/:id/chat', requirePermission('voiceai.agents.execute'), chatWithAgent);
 
 // ── Post-call action routes (must come before /:id to avoid conflicts) ────────
 // Static sub-routes first

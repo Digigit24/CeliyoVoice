@@ -1,24 +1,94 @@
 import type { RequestHandler } from 'express';
 import { CallService } from './call.service';
 import { success, errorResponse, paginated } from '../utils/apiResponse';
+import { callDispatchLogger } from '../utils/logger';
 import { StartCallSchema, ListCallsQuerySchema } from './validators/call.validators';
 import type { CallStatus, VoiceProvider } from '@prisma/client';
 
 type IdParam = { id: string };
 
+// Duck-typed provider error shape — both Omnidim and Bolna use these names/fields
+type ProviderError = Error & { statusCode?: number; raw?: unknown };
+
+function isProviderAuthError(err: unknown): err is ProviderError {
+  return err instanceof Error && err.name === 'ProviderAuthError';
+}
+
+function isProviderApiError(err: unknown): err is ProviderError {
+  return err instanceof Error && err.name === 'ProviderApiError';
+}
+
 /** POST /api/v1/calls/start */
 export const startCall: RequestHandler = async (req, res) => {
   const parsed = StartCallSchema.safeParse(req.body);
   if (!parsed.success) {
+    callDispatchLogger.warn(
+      { tenantId: req.tenantId, userId: req.userId, validationErrors: parsed.error.flatten() },
+      'dispatch-call: validation failed',
+    );
     return errorResponse(res, 'Validation failed', 'VALIDATION_ERROR', 400, parsed.error.flatten());
   }
+
+  const { agentId, phone } = parsed.data;
+
+  callDispatchLogger.info(
+    { tenantId: req.tenantId, userId: req.userId, agentId, phone },
+    'dispatch-call: request received',
+  );
 
   const svc = new CallService(req.prisma!);
   try {
     const call = await svc.startCall(req.tenantId!, req.userId!, parsed.data);
+
+    callDispatchLogger.info(
+      { tenantId: req.tenantId, callId: call.id, provider: call.provider, status: call.status, providerCallId: call.providerCallId },
+      'dispatch-call: success',
+    );
+
     return success(res, call, 202);
   } catch (err) {
-    const appErr = err as { statusCode?: number; message: string };
+    // Provider authentication failure (bad/expired API key)
+    if (isProviderAuthError(err)) {
+      callDispatchLogger.error(
+        { tenantId: req.tenantId, agentId, phone, message: err.message },
+        'dispatch-call: provider authentication failed',
+      );
+      return errorResponse(res, err.message, 'PROVIDER_AUTH_ERROR', 401);
+    }
+
+    // Provider returned a non-2xx HTTP response — surface its status and body
+    if (isProviderApiError(err)) {
+      const providerStatus = (err as ProviderError).statusCode ?? 502;
+      // Map provider 5xx → 502 Bad Gateway; pass provider 4xx through as-is
+      const httpStatus = providerStatus >= 500 ? 502 : providerStatus;
+
+      callDispatchLogger.error(
+        {
+          tenantId: req.tenantId,
+          agentId,
+          phone,
+          providerStatus,
+          providerRaw: (err as ProviderError).raw,
+          message: err.message,
+        },
+        'dispatch-call: provider API error',
+      );
+
+      return errorResponse(
+        res,
+        err.message,
+        'PROVIDER_API_ERROR',
+        httpStatus,
+        (err as ProviderError).raw ?? undefined,
+      );
+    }
+
+    // Application-level errors (agent not found, missing providerAgentId, etc.)
+    const appErr = err as Error & { statusCode?: number };
+    callDispatchLogger.error(
+      { tenantId: req.tenantId, agentId, phone, message: appErr.message, statusCode: appErr.statusCode },
+      'dispatch-call: error',
+    );
     return errorResponse(res, appErr.message, 'ERROR', appErr.statusCode ?? 500);
   }
 };

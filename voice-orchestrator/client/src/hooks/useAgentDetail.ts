@@ -1,9 +1,15 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/axios';
 
+export type AgentType = 'VOICE' | 'CHAT' | 'HYBRID';
+
 export interface AgentDetail {
   id: string;
   name: string;
+  agentType: AgentType;
+  typeConfig: Record<string, unknown>;
+  llmProvider?: string | null;
+  llmModel?: string | null;
   provider: string;
   providerAgentId?: string | null;
   voiceLanguage: string;
@@ -29,6 +35,10 @@ export interface AgentDetail {
 
 export interface UpdateAgentPayload {
   name?: string;
+  agentType?: AgentType;
+  typeConfig?: Record<string, unknown>;
+  llmProvider?: string;
+  llmModel?: string;
   voiceLanguage?: string;
   voiceModel?: string;
   systemPrompt?: string;

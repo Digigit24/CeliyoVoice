@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/ritik/hrithik/celiyovoice/voice-orchestrator/server/src -name *seed* -o -name *validator* -o -name *schema*)",
+      "Bash(find /c/ritik/hrithik/celiyovoice/voice-orchestrator/server/src -name *.validators.ts -o -name *zod*)",
+      "Bash(find /c/ritik/hrithik/celiyovoice -maxdepth 2 -type d ! -path */node_modules* ! -path */.vite*)",
+      "Bash(npx prisma:*)",
+      "Bash(grep -E \"\\\\.\\(ts|js\\)$\")",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}

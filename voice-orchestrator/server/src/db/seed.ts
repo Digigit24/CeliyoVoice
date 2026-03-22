@@ -4,9 +4,11 @@
  * Creates:
  *   - 2 provider credentials (Omnidim + Bolna)
  *   - 2 global provider configs (Omnidim + Bolna)
- *   - 3 sample agents
+ *   - 3 sample voice agents + 2 sample chat agents
  *   - 10 sample calls with mixed statuses
- *   - 2 sample tools
+ *   - 2 sample tools with input schemas
+ *   - 1 sample LLM credential (OpenAI)
+ *   - Sample agent-tool junction records
  *
  * Note: Tenants are managed by the SuperAdmin service — no local Tenant table.
  * The TEST_TENANT_ID below should be a real tenant ID from SuperAdmin.
@@ -148,7 +150,64 @@ async function seed(): Promise<void> {
     update: { name: 'Appointment Reminder Agent' },
   });
 
-  console.log(`✅ Agents: ${[agent1, agent2, agent3].map((a) => a.name).join(', ')}`);
+  // ── Chat Agents ──────────────────────────────────────────────────────────
+  const chatAgent1 = await prisma.agent.upsert({
+    where: { id: 'a0000001-0000-0000-0000-000000000004' },
+    create: {
+      id: 'a0000001-0000-0000-0000-000000000004',
+      tenantId: TEST_TENANT_ID,
+      ownerUserId: SEED_USER_ID,
+      name: 'Customer FAQ Chatbot',
+      agentType: 'CHAT',
+      typeConfig: {
+        llmProvider: 'OPENAI',
+        llmModel: 'gpt-4o',
+        temperature: 0.3,
+        maxTokens: 1024,
+        streaming: true,
+      },
+      llmProvider: 'OPENAI',
+      llmModel: 'gpt-4o',
+      provider: 'OMNIDIM', // required field — not used for chat agents
+      systemPrompt: 'You are a helpful FAQ chatbot for Acme Corp. Answer customer questions based on the knowledge base.',
+      isActive: true,
+      tools: [],
+    },
+    update: { name: 'Customer FAQ Chatbot' },
+  });
+
+  const chatAgent2 = await prisma.agent.upsert({
+    where: { id: 'a0000001-0000-0000-0000-000000000005' },
+    create: {
+      id: 'a0000001-0000-0000-0000-000000000005',
+      tenantId: TEST_TENANT_ID,
+      ownerUserId: SEED_USER_ID,
+      name: 'Internal Ops Assistant',
+      agentType: 'HYBRID',
+      typeConfig: {
+        voiceLanguage: 'en-US',
+        voiceModel: 'male',
+        provider: 'OMNIDIM',
+        llmProvider: 'ANTHROPIC',
+        llmModel: 'claude-sonnet-4-20250514',
+        temperature: 0.5,
+        maxTokens: 2048,
+        streaming: true,
+      },
+      llmProvider: 'ANTHROPIC',
+      llmModel: 'claude-sonnet-4-20250514',
+      provider: 'OMNIDIM',
+      voiceLanguage: 'en-US',
+      voiceModel: 'male',
+      systemPrompt: 'You are an internal operations assistant. Help employees with order lookups, scheduling, and internal processes.',
+      maxConcurrentCalls: 2,
+      isActive: true,
+      tools: [],
+    },
+    update: { name: 'Internal Ops Assistant' },
+  });
+
+  console.log(`✅ Agents: ${[agent1, agent2, agent3, chatAgent1, chatAgent2].map((a) => a.name).join(', ')}`);
 
   // ── Tools ─────────────────────────────────────────────────────────────────
   const tool1 = await prisma.tool.upsert({
@@ -167,6 +226,13 @@ async function seed(): Promise<void> {
       timeout: 10,
       retries: 1,
       isActive: true,
+      inputSchema: {
+        type: 'object',
+        properties: { orderId: { type: 'string', description: 'The order ID to look up' } },
+        required: ['orderId'],
+      },
+      category: 'CRM',
+      source: 'MANUAL',
     },
     update: { name: 'check_order_status' },
   });
@@ -187,6 +253,17 @@ async function seed(): Promise<void> {
       timeout: 15,
       retries: 2,
       isActive: true,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          customerId: { type: 'string', description: 'Customer ID' },
+          callbackTime: { type: 'string', format: 'date-time', description: 'When to call back' },
+          notes: { type: 'string', description: 'Notes for the callback' },
+        },
+        required: ['customerId', 'callbackTime'],
+      },
+      category: 'CRM',
+      source: 'MANUAL',
     },
     update: { name: 'schedule_callback' },
   });
@@ -238,6 +315,65 @@ async function seed(): Promise<void> {
     });
   }
   console.log('✅ Calls: 10 sample calls seeded');
+
+  // ── LLM Credentials ────────────────────────────────────────────────────────
+  const openaiKey = process.env['OPENAI_API_KEY'] ?? 'seed-openai-key';
+  await prisma.lLMCredential.upsert({
+    where: { tenantId_provider: { tenantId: TEST_TENANT_ID, provider: 'OPENAI' } },
+    create: {
+      tenantId: TEST_TENANT_ID,
+      provider: 'OPENAI',
+      apiKey: encrypt(openaiKey),
+      config: {},
+      isActive: true,
+      isDefault: true,
+    },
+    update: { apiKey: encrypt(openaiKey), isDefault: true },
+  });
+  console.log('✅ LLMCredential: OPENAI (default)');
+
+  // ── Agent–Tool Junction ────────────────────────────────────────────────────
+  // Link chat agent to check_order_status tool
+  await prisma.agentTool.upsert({
+    where: { agentId_toolId: { agentId: chatAgent1.id, toolId: tool1.id } },
+    create: {
+      tenantId: TEST_TENANT_ID,
+      agentId: chatAgent1.id,
+      toolId: tool1.id,
+      whenToUse: 'Use when the customer asks about the status of their order.',
+      isRequired: false,
+      priority: 1,
+    },
+    update: {},
+  });
+
+  // Link hybrid agent to both tools
+  await prisma.agentTool.upsert({
+    where: { agentId_toolId: { agentId: chatAgent2.id, toolId: tool1.id } },
+    create: {
+      tenantId: TEST_TENANT_ID,
+      agentId: chatAgent2.id,
+      toolId: tool1.id,
+      whenToUse: 'Use when an employee asks to check order status.',
+      isRequired: false,
+      priority: 1,
+    },
+    update: {},
+  });
+
+  await prisma.agentTool.upsert({
+    where: { agentId_toolId: { agentId: chatAgent2.id, toolId: tool2.id } },
+    create: {
+      tenantId: TEST_TENANT_ID,
+      agentId: chatAgent2.id,
+      toolId: tool2.id,
+      whenToUse: 'Use when scheduling a customer callback.',
+      isRequired: false,
+      priority: 2,
+    },
+    update: {},
+  });
+  console.log('✅ AgentTool: 3 agent-tool links seeded');
 
   console.log('\n🎉 Seed complete!');
   console.log(`\nTest tenant ID:   ${TEST_TENANT_ID}`);

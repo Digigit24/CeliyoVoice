@@ -35,6 +35,21 @@ export const config = {
     },
   },
 
+  llm: {
+    openai: {
+      apiKey: env.LLM_OPENAI_API_KEY,
+      apiUrl: env.LLM_OPENAI_API_URL,
+    },
+    anthropic: {
+      apiKey: env.LLM_ANTHROPIC_API_KEY,
+      apiUrl: env.LLM_ANTHROPIC_API_URL,
+    },
+    google: {
+      apiKey: env.LLM_GOOGLE_API_KEY,
+      apiUrl: env.LLM_GOOGLE_API_URL,
+    },
+  },
+
   encryption: {
     key: env.ENCRYPTION_KEY,
     algorithm: 'aes-256-gcm' as const,

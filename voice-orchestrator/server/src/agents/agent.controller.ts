@@ -48,6 +48,7 @@ export const listAgents: RequestHandler = async (req, res) => {
     page: q.data.page,
     limit: q.data.limit,
     provider: q.data.provider,
+    agentType: q.data.agentType,
     isActive: q.data.isActive,
     search: q.data.search,
     sortBy: q.data.sortBy,
