@@ -4,11 +4,13 @@ import jwt from 'jsonwebtoken';
 import { config } from '../core/config';
 import { defaultPrismaClient } from '../db/client';
 import { createChildLogger } from '../utils/logger';
+import type { McpKeyContext } from './mcp.types';
 
 const log = createChildLogger({ component: 'mcp-auth' });
 
 /**
  * MCP auth middleware — supports JWT bearer tokens AND MCP API keys.
+ * Attaches McpKeyContext to (req as any).mcpKeyContext for downstream use.
  */
 export async function mcpAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
@@ -31,6 +33,17 @@ export async function mcpAuth(req: Request, res: Response, next: NextFunction): 
       req.tenantId = payload.tenant_id;
       req.userId = payload.user_id;
       req.prisma = defaultPrismaClient;
+
+      const mcpCtx: McpKeyContext = {
+        tenantId: payload.tenant_id,
+        keyId: 'jwt-session',
+        keyName: 'JWT Session',
+        scope: 'ALL',
+        agentId: undefined,
+        toolIds: [],
+      };
+      (req as unknown as { mcpKeyContext: McpKeyContext }).mcpKeyContext = mcpCtx;
+
       return next();
     }
   } catch {
@@ -47,7 +60,17 @@ export async function mcpAuth(req: Request, res: Response, next: NextFunction): 
     if (record) {
       req.tenantId = record.tenantId;
       req.prisma = defaultPrismaClient;
-      (req as unknown as { mcpAgentId?: string | null }).mcpAgentId = record.agentId;
+
+      const mcpCtx: McpKeyContext = {
+        tenantId: record.tenantId,
+        keyId: record.id,
+        keyName: record.name,
+        keyDescription: record.description ?? undefined,
+        scope: record.scope,
+        agentId: record.agentId,
+        toolIds: Array.isArray(record.toolIds) ? (record.toolIds as string[]) : [],
+      };
+      (req as unknown as { mcpKeyContext: McpKeyContext }).mcpKeyContext = mcpCtx;
 
       // Update lastUsedAt (fire-and-forget)
       defaultPrismaClient.mcpApiKey.update({
@@ -55,7 +78,7 @@ export async function mcpAuth(req: Request, res: Response, next: NextFunction): 
         data: { lastUsedAt: new Date() },
       }).catch(() => {});
 
-      log.debug({ keyId: record.id, tenantId: record.tenantId }, 'MCP API key authenticated');
+      log.debug({ keyId: record.id, tenantId: record.tenantId, scope: record.scope }, 'MCP API key authenticated');
       return next();
     }
   } catch (err) {

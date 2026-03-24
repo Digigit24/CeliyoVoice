@@ -1,4 +1,4 @@
-import type { PrismaClient, Tool } from '@prisma/client';
+import type { PrismaClient, Tool, ToolCredential } from '@prisma/client';
 import { logger } from '../utils/logger';
 
 /** In-memory per-tenant tool definition cache. */
@@ -69,4 +69,20 @@ export function removeCachedTool(tenantId: string, toolId: string): void {
 export function clearTenantToolCache(tenantId: string): void {
   registry.delete(tenantId);
   logger.debug({ tenantId }, 'Tool registry cache cleared');
+}
+
+/**
+ * Loads a tool WITH its linked credential relation for execution.
+ * Always hits DB — bypasses the cache because credential tokens may have
+ * been refreshed since the tool definition was cached.
+ */
+export async function getToolForExecution(
+  toolId: string,
+  tenantId: string,
+  prisma: PrismaClient,
+): Promise<(Tool & { credential: ToolCredential | null }) | null> {
+  return prisma.tool.findFirst({
+    where: { id: toolId, tenantId, isActive: true },
+    include: { credential: true },
+  });
 }

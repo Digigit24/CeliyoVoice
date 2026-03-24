@@ -6,7 +6,8 @@
       "Bash(find /c/ritik/hrithik/celiyovoice -maxdepth 2 -type d ! -path */node_modules* ! -path */.vite*)",
       "Bash(npx prisma:*)",
       "Bash(grep -E \"\\\\.\\(ts|js\\)$\")",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(xargs grep:*)"
     ]
   }
 }

@@ -41,6 +41,9 @@ enum ToolAuthType {
   API_KEY
   BEARER
   OAUTH
+  /// Long-lived service token issued by the SuperAdmin platform per-tenant.
+  /// authConfig stores { serviceToken: "<encrypted-token>" }.
+  PLATFORM
 }
 
 enum WebhookEventStatus {
@@ -530,18 +533,24 @@ model ToolTagAssignment {
   @@map("tool_tag_assignments")
 }
 
-/// API keys for MCP server access.
+/// API keys for MCP server access — each key acts as a virtual MCP server.
 model McpApiKey {
-  id         String    @id @default(uuid())
-  tenantId   String
-  name       String
+  id          String    @id @default(uuid())
+  tenantId    String
+  name        String
+  /// Optional description shown in MCP initialize response.
+  description String?
   /// SHA-256 hash of the raw API key.
-  keyHash    String
-  /// Optional: restrict to a specific agent's tools.
-  agentId    String?
-  isActive   Boolean   @default(true)
-  lastUsedAt DateTime?
-  createdAt  DateTime  @default(now())
+  keyHash     String
+  /// Tool access scope: "ALL" | "AGENT" | "CUSTOM"
+  scope       String    @default("ALL")
+  /// If scope=AGENT, which agent's tools to expose.
+  agentId     String?
+  /// If scope=CUSTOM, specific tool IDs to expose (JSON array of UUIDs).
+  toolIds     Json      @default("[]")
+  isActive    Boolean   @default(true)
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
 
   @@index([tenantId])
   @@index([keyHash])

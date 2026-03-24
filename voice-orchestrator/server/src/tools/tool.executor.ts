@@ -1,7 +1,8 @@
 import axios from 'axios';
-import type { PrismaClient, HttpMethod, ToolAuthType, Tool } from '@prisma/client';
-import { getToolById } from './tool.registry';
+import type { PrismaClient, HttpMethod, Tool } from '@prisma/client';
+import { getToolForExecution } from './tool.registry';
 import { getBuiltInFunction } from './functions';
+import { resolveToolAuth, type ToolWithCredential } from './credentialResolver';
 import { createChildLogger } from '../utils/logger';
 
 const log = createChildLogger({ component: 'tool-executor' });
@@ -43,36 +44,19 @@ function interpolate(template: unknown, data: Record<string, unknown>): unknown 
   return template;
 }
 
-function buildAuthHeaders(authType: ToolAuthType, authConfig: Record<string, unknown>): Record<string, string> {
-  switch (authType) {
-    case 'API_KEY': {
-      const headerName = String(authConfig['headerName'] ?? 'X-API-Key');
-      const key = String(authConfig['apiKey'] ?? '');
-      return { [headerName]: key };
-    }
-    case 'BEARER': {
-      const token = String(authConfig['token'] ?? '');
-      return { Authorization: `Bearer ${token}` };
-    }
-    case 'NONE':
-    case 'OAUTH':
-    default:
-      return {};
-  }
-}
-
 export class ToolExecutor {
   constructor(private readonly prisma: PrismaClient) {}
 
   /**
    * Executes a tool by type — routes to the appropriate executor.
+   * Always loads the tool fresh with credential relation for correct auth resolution.
    */
   async executeTool(
     toolId: string,
     context: ExecutionContext,
     inputData: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    const tool = await getToolById(toolId, context.tenantId, this.prisma);
+    const tool = await getToolForExecution(toolId, context.tenantId, this.prisma);
     if (!tool) {
       throw new Error(`Tool ${toolId} not found for tenant ${context.tenantId}`);
     }
@@ -118,10 +102,7 @@ export class ToolExecutor {
       ? interpolate(tool.bodyTemplate, interpolationData)
       : inputData;
 
-    const authHeaders = buildAuthHeaders(
-      tool.authType as ToolAuthType,
-      tool.authConfig as Record<string, unknown>,
-    );
+    const authHeaders = await resolveToolAuth(tool as ToolWithCredential, this.prisma);
 
     const requestHeaders: Record<string, string> = {
       'Content-Type': 'application/json',

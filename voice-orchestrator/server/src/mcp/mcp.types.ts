@@ -24,3 +24,24 @@ export interface McpToolCallResult {
   content: Array<{ type: 'text'; text: string }>;
   isError?: boolean;
 }
+
+/**
+ * Full context extracted from a verified MCP API key (or JWT session).
+ * Passed through the request lifecycle so the MCP server can resolve
+ * the correct tool set and personalize the initialize response.
+ */
+export interface McpKeyContext {
+  tenantId: string;
+  /** The McpApiKey.id, or 'jwt-session' for JWT-authenticated requests. */
+  keyId: string;
+  /** Display name of this virtual MCP server. */
+  keyName: string;
+  /** Optional description returned in the initialize response. */
+  keyDescription?: string;
+  /** Tool access scope: "ALL" | "AGENT" | "CUSTOM" */
+  scope: string;
+  /** If scope=AGENT, the target agent's ID. */
+  agentId?: string | null;
+  /** If scope=CUSTOM, the explicit list of tool IDs to expose. */
+  toolIds: string[];
+}

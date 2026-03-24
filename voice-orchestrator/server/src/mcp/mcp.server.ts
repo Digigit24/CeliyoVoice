@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import { Prisma } from '@prisma/client';
-import type { JsonRpcRequest, JsonRpcResponse, McpToolDef, McpToolCallResult } from './mcp.types';
+import type { JsonRpcRequest, JsonRpcResponse, McpToolDef, McpToolCallResult, McpKeyContext } from './mcp.types';
 import { ToolExecutor, type ExecutionContext } from '../tools/tool.executor';
 import { createChildLogger } from '../utils/logger';
 
@@ -11,19 +11,18 @@ export class McpServer {
 
   async handleRequest(
     request: JsonRpcRequest,
-    tenantId: string,
-    agentId?: string | null,
+    ctx: McpKeyContext,
   ): Promise<JsonRpcResponse> {
     try {
       switch (request.method) {
         case 'initialize':
-          return this.handleInitialize(request);
+          return this.handleInitialize(request, ctx.keyName, ctx.keyDescription);
         case 'notifications/initialized':
           return { jsonrpc: '2.0', id: request.id, result: {} };
         case 'tools/list':
-          return this.handleToolsList(request, tenantId, agentId);
+          return this.handleToolsList(request, ctx);
         case 'tools/call':
-          return this.handleToolsCall(request, tenantId, agentId);
+          return this.handleToolsCall(request, ctx);
         case 'ping':
           return { jsonrpc: '2.0', id: request.id, result: {} };
         default:
@@ -44,60 +43,98 @@ export class McpServer {
     }
   }
 
-  private handleInitialize(req: JsonRpcRequest): JsonRpcResponse {
+  private handleInitialize(
+    req: JsonRpcRequest,
+    keyName?: string,
+    keyDescription?: string,
+  ): JsonRpcResponse {
+    const serverSlug = keyName
+      ? `celiyo-${keyName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`
+      : 'celiyo-mcp';
     return {
       jsonrpc: '2.0',
       id: req.id,
       result: {
         protocolVersion: '2024-11-05',
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: 'celiyo-mcp', version: '1.0.0' },
+        serverInfo: {
+          name: serverSlug,
+          version: '1.0.0',
+          ...(keyDescription ? { description: keyDescription } : {}),
+        },
       },
     };
   }
 
+  /**
+   * Resolve tools for the given key context. Public so the key-tools API
+   * endpoint can reuse the same logic.
+   */
+  async resolveTools(ctx: McpKeyContext): Promise<McpToolDef[]> {
+    const { tenantId, scope, agentId, toolIds } = ctx;
+
+    switch (scope) {
+      case 'AGENT': {
+        if (!agentId) return [];
+        const agentTools = await this.prisma.agentTool.findMany({
+          where: { agentId, tenantId },
+          include: { tool: true },
+          orderBy: { priority: 'asc' },
+        });
+        return agentTools
+          .filter((at) => at.tool.isActive && at.tool.inputSchema)
+          .map((at) => ({
+            name: at.tool.name,
+            description: at.whenToUse
+              ? `${at.tool.description}\n\nWhen to use: ${at.whenToUse}`
+              : at.tool.description,
+            inputSchema: (at.tool.inputSchema as Record<string, unknown>) ?? { type: 'object', properties: {} },
+          }));
+      }
+
+      case 'CUSTOM': {
+        if (!toolIds || toolIds.length === 0) return [];
+        const selectedTools = await this.prisma.tool.findMany({
+          where: {
+            tenantId,
+            id: { in: toolIds },
+            isActive: true,
+            inputSchema: { not: Prisma.JsonNull },
+          },
+          orderBy: { name: 'asc' },
+        });
+        return selectedTools.map((t) => ({
+          name: t.name,
+          description: t.description,
+          inputSchema: (t.inputSchema as Record<string, unknown>) ?? { type: 'object', properties: {} },
+        }));
+      }
+
+      case 'ALL':
+      default: {
+        const allTools = await this.prisma.tool.findMany({
+          where: {
+            tenantId,
+            isActive: true,
+            inputSchema: { not: Prisma.JsonNull },
+          },
+          orderBy: { name: 'asc' },
+        });
+        return allTools.map((t) => ({
+          name: t.name,
+          description: t.description,
+          inputSchema: (t.inputSchema as Record<string, unknown>) ?? { type: 'object', properties: {} },
+        }));
+      }
+    }
+  }
+
   private async handleToolsList(
     req: JsonRpcRequest,
-    tenantId: string,
-    agentId?: string | null,
+    ctx: McpKeyContext,
   ): Promise<JsonRpcResponse> {
-    let tools: McpToolDef[];
-
-    if (agentId) {
-      // Scoped to agent — only tools attached via AgentTool
-      const agentTools = await this.prisma.agentTool.findMany({
-        where: { agentId, tenantId },
-        include: { tool: true },
-        orderBy: { priority: 'asc' },
-      });
-      tools = agentTools
-        .filter((at) => at.tool.isActive && at.tool.inputSchema)
-        .map((at) => ({
-          name: at.tool.name,
-          description: at.whenToUse
-            ? `${at.tool.description}\n\nWhen to use: ${at.whenToUse}`
-            : at.tool.description,
-          inputSchema: (at.tool.inputSchema as Record<string, unknown>) ?? { type: 'object', properties: {} },
-        }));
-    } else {
-      // All active tools for tenant with inputSchema
-      const allTools = await this.prisma.tool.findMany({
-        where: {
-          tenantId,
-          isActive: true,
-          inputSchema: { not: Prisma.JsonNull },
-        },
-        orderBy: { name: 'asc' },
-      });
-      tools = allTools.map((t) => ({
-        name: t.name,
-        description: t.description,
-        inputSchema: (t.inputSchema as Record<string, unknown>) ?? { type: 'object', properties: {} },
-      }));
-    }
-
-    log.debug({ tenantId, agentId, toolCount: tools.length }, 'MCP tools/list');
-
+    const tools = await this.resolveTools(ctx);
+    log.debug({ tenantId: ctx.tenantId, scope: ctx.scope, toolCount: tools.length }, 'MCP tools/list');
     return {
       jsonrpc: '2.0',
       id: req.id,
@@ -107,9 +144,9 @@ export class McpServer {
 
   private async handleToolsCall(
     req: JsonRpcRequest,
-    tenantId: string,
-    agentId?: string | null,
+    ctx: McpKeyContext,
   ): Promise<JsonRpcResponse> {
+    const { tenantId, scope, agentId, toolIds } = ctx;
     const params = req.params as { name?: string; arguments?: Record<string, unknown> } | undefined;
     const toolName = params?.name;
     const args = params?.arguments ?? {};
@@ -122,7 +159,7 @@ export class McpServer {
       };
     }
 
-    // Find tool by name
+    // Find tool by name, scoped to tenant
     const tool = await this.prisma.tool.findFirst({
       where: { tenantId, name: toolName, isActive: true },
     });
@@ -135,8 +172,8 @@ export class McpServer {
       };
     }
 
-    // If scoped to agent, verify tool is attached
-    if (agentId) {
+    // Scope validation: ensure the tool is within this key's allowed set
+    if (scope === 'AGENT' && agentId) {
       const attached = await this.prisma.agentTool.findFirst({
         where: { agentId, toolId: tool.id, tenantId },
       });
@@ -145,6 +182,14 @@ export class McpServer {
           jsonrpc: '2.0',
           id: req.id,
           error: { code: -32602, message: `Tool "${toolName}" is not attached to this agent` },
+        };
+      }
+    } else if (scope === 'CUSTOM') {
+      if (!toolIds.includes(tool.id)) {
+        return {
+          jsonrpc: '2.0',
+          id: req.id,
+          error: { code: -32602, message: `Tool "${toolName}" is not in this server's allowed tool set` },
         };
       }
     }

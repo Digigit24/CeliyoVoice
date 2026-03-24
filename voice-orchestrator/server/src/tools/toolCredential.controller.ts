@@ -2,20 +2,41 @@ import type { RequestHandler } from 'express';
 import { z } from 'zod';
 import { encrypt, decrypt } from '../utils/crypto';
 import { success, errorResponse, paginated } from '../utils/apiResponse';
+import { clearCredentialTokenCache } from './credentialResolver';
 import { createChildLogger } from '../utils/logger';
 
 const log = createChildLogger({ component: 'tool-credential' });
 
+const AUTH_TYPES = ['NONE', 'API_KEY', 'BEARER', 'OAUTH', 'PLATFORM'] as const;
+
 const CreateSchema = z.object({
   name: z.string().min(1).max(255),
-  authType: z.enum(['NONE', 'API_KEY', 'BEARER', 'OAUTH']),
+  authType: z.enum(AUTH_TYPES),
   authConfig: z.record(z.unknown()),
   service: z.string().max(255).optional(),
+}).superRefine((data, ctx) => {
+  const c = data.authConfig;
+  switch (data.authType) {
+    case 'BEARER':
+      if (!c['token']) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'BEARER requires "token" in authConfig', path: ['authConfig'] });
+      break;
+    case 'API_KEY':
+      if (!c['apiKey'] && !c['value']) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'API_KEY requires "apiKey" in authConfig', path: ['authConfig'] });
+      break;
+    case 'PLATFORM':
+      if (!c['token']) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'PLATFORM requires "token" (JWT) in authConfig', path: ['authConfig'] });
+      break;
+    case 'OAUTH':
+      if (!c['tokenUrl']) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'OAUTH requires "tokenUrl" in authConfig', path: ['authConfig'] });
+      if (!c['clientId']) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'OAUTH requires "clientId" in authConfig', path: ['authConfig'] });
+      if (!c['clientSecret'] && !c['refreshToken']) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'OAUTH requires "clientSecret" (client_credentials) or "refreshToken" (refresh_token flow)', path: ['authConfig'] });
+      break;
+  }
 });
 
 const UpdateSchema = z.object({
   name: z.string().min(1).max(255).optional(),
-  authType: z.enum(['NONE', 'API_KEY', 'BEARER', 'OAUTH']).optional(),
+  authType: z.enum(AUTH_TYPES).optional(),
   authConfig: z.record(z.unknown()).optional(),
   service: z.string().max(255).optional().nullable(),
   isActive: z.boolean().optional(),
@@ -107,6 +128,9 @@ export const updateToolCredential: RequestHandler = async (req, res) => {
     include: { _count: { select: { tools: true } } },
   });
 
+  // Clear any cached tokens so the updated credential is used immediately
+  await clearCredentialTokenCache(id);
+
   return success(res, maskCredential(updated));
 };
 
@@ -118,5 +142,6 @@ export const deleteToolCredential: RequestHandler = async (req, res) => {
   if (!existing) return errorResponse(res, 'Credential not found', 'CREDENTIAL_NOT_FOUND', 404);
 
   await prisma.toolCredential.delete({ where: { id } });
+  await clearCredentialTokenCache(id);
   return success(res, { deleted: true });
 };
