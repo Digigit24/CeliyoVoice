@@ -5,18 +5,30 @@ import { success, errorResponse } from '../utils/apiResponse';
 const CreateTagSchema = z.object({
   name: z.string().min(1).max(100),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  isToolkit: z.boolean().optional().default(false),
+});
+
+const UpdateTagSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(),
+  isToolkit: z.boolean().optional(),
 });
 
 const AssignTagsSchema = z.object({
   tagIds: z.array(z.string().uuid()).min(1),
 });
 
-/** GET /api/v1/tools/tags */
+/** GET /api/v1/tools/tags — supports ?isToolkit=true|false filter */
 export const listTags: RequestHandler = async (req, res) => {
+  const where: Record<string, unknown> = { tenantId: req.tenantId! };
+  if (req.query['isToolkit'] !== undefined) {
+    where['isToolkit'] = req.query['isToolkit'] === 'true';
+  }
+
   const tags = await req.prisma!.toolTag.findMany({
-    where: { tenantId: req.tenantId! },
+    where,
     include: { _count: { select: { tools: true } } },
-    orderBy: { name: 'asc' },
+    orderBy: [{ isToolkit: 'desc' }, { name: 'asc' }],
   });
   return success(res, tags);
 };
@@ -28,11 +40,37 @@ export const createTag: RequestHandler = async (req, res) => {
 
   try {
     const tag = await req.prisma!.toolTag.create({
-      data: { tenantId: req.tenantId!, name: parsed.data.name, color: parsed.data.color },
+      data: {
+        tenantId: req.tenantId!,
+        name: parsed.data.name,
+        color: parsed.data.color,
+        isToolkit: parsed.data.isToolkit ?? false,
+      },
     });
     return success(res, tag, 201);
   } catch {
     return errorResponse(res, 'Tag already exists', 'CONFLICT', 409);
+  }
+};
+
+/** PUT /api/v1/tools/tags/:id — update name, color, or promote to toolkit */
+export const updateTag: RequestHandler = async (req, res) => {
+  const { id } = req.params as { id: string };
+  const parsed = UpdateTagSchema.safeParse(req.body);
+  if (!parsed.success) return errorResponse(res, 'Validation failed', 'VALIDATION_ERROR', 400, parsed.error.flatten());
+
+  const existing = await req.prisma!.toolTag.findFirst({ where: { id, tenantId: req.tenantId! } });
+  if (!existing) return errorResponse(res, 'Tag not found', 'NOT_FOUND', 404);
+
+  try {
+    const tag = await req.prisma!.toolTag.update({
+      where: { id },
+      data: parsed.data,
+      include: { _count: { select: { tools: true } } },
+    });
+    return success(res, tag);
+  } catch {
+    return errorResponse(res, 'Update failed', 'CONFLICT', 409);
   }
 };
 

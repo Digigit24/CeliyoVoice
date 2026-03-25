@@ -71,6 +71,7 @@ export interface ParsedTool {
   category?: string;
   timeout: number;
   retries: number;
+  rateLimitPerMinute?: number;
   source: 'CELIYO_IMPORT' | 'SWAGGER_IMPORT';
   importMeta: {
     collectionName: string;

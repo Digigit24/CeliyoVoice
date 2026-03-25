@@ -80,6 +80,7 @@ export class ToolImportService {
             category: parsed.category,
             timeout: parsed.timeout,
             retries: parsed.retries,
+            rateLimitPerMinute: parsed.rateLimitPerMinute ?? undefined,
             source: parsed.source as ToolSource,
             importMeta: parsed.importMeta as Prisma.InputJsonValue,
           },

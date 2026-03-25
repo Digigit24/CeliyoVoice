@@ -198,7 +198,7 @@ export class McpServer {
     const startTime = Date.now();
     try {
       const executor = new ToolExecutor(this.prisma);
-      const context: ExecutionContext = { tenantId, agentId: agentId ?? undefined };
+      const context: ExecutionContext = { tenantId, agentId: agentId ?? undefined, mcpKeyId: ctx.keyId, source: 'MCP' };
       const result = await executor.executeTool(tool.id, context, args);
 
       const durationMs = Date.now() - startTime;

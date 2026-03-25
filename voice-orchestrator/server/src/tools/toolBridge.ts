@@ -7,31 +7,64 @@ import { createChildLogger } from '../utils/logger';
 const log = createChildLogger({ component: 'tool-bridge' });
 
 /**
- * Load tools attached to an agent and convert to LLM ToolDefinition[].
+ * Load tools for an agent — merges individual AgentTool bindings and
+ * toolkit (AgentToolkit) subscriptions. Deduplicates by tool name;
+ * explicit AgentTool bindings take priority (carry whenToUse/priority).
  */
 export async function getToolDefinitionsForAgent(
   agentId: string,
   tenantId: string,
   prisma: PrismaClient,
 ): Promise<ToolDefinition[]> {
+  // Individual tool bindings
   const agentTools = await prisma.agentTool.findMany({
     where: { agentId, tenantId },
     include: { tool: true },
     orderBy: { priority: 'asc' },
   });
 
-  return agentTools
-    .filter((at) => at.tool.isActive && at.tool.inputSchema)
-    .map((at) => ({
-      name: at.tool.name,
-      description: at.whenToUse
-        ? `${at.tool.description}\n\nWhen to use: ${at.whenToUse}`
-        : at.tool.description,
-      inputSchema: (at.tool.inputSchema as Record<string, unknown>) ?? {
-        type: 'object',
-        properties: {},
+  // Toolkit subscriptions
+  const toolkitSubs = await prisma.agentToolkit.findMany({
+    where: { agentId, tenantId },
+    include: {
+      tag: {
+        include: {
+          tools: { include: { tool: true } },
+        },
       },
-    }));
+    },
+  });
+
+  // Build merged map (by tool name, individual binding wins)
+  const toolMap = new Map<string, { tool: typeof agentTools[0]['tool']; whenToUse: string | null }>();
+
+  // First pass: individual bindings (ordered by priority)
+  for (const at of agentTools) {
+    if (!at.tool.isActive || !at.tool.inputSchema) continue;
+    toolMap.set(at.tool.name, { tool: at.tool, whenToUse: at.whenToUse });
+  }
+
+  // Second pass: toolkit tools (only if name not already present)
+  for (const sub of toolkitSubs) {
+    for (const assignment of sub.tag.tools) {
+      const t = assignment.tool;
+      if (!t.isActive || !t.inputSchema) continue;
+      if (!toolMap.has(t.name)) {
+        toolMap.set(t.name, { tool: t, whenToUse: null });
+      }
+    }
+  }
+
+  return Array.from(toolMap.values()).map(({ tool, whenToUse }) => ({
+    name: tool.name,
+    description: whenToUse
+      ? `${tool.description}\n\nWhen to use: ${whenToUse}`
+      : tool.description,
+    inputSchema: (tool.inputSchema as Record<string, unknown>) ?? {
+      type: 'object',
+      properties: {},
+    },
+  }));
 }
 
 export interface ToolCallResult {
@@ -45,6 +78,7 @@ export interface ToolCallResult {
 
 /**
  * Execute a tool call from the LLM and return the result as a string.
+ * Resolves the tool from both AgentTool and AgentToolkit subscriptions.
  */
 export async function executeToolCall(
   toolCall: ToolCall,
@@ -56,17 +90,29 @@ export async function executeToolCall(
   const startTime = Date.now();
 
   try {
-    // Find the AgentTool junction by tool name + agentId
-    const agentTool = await prisma.agentTool.findFirst({
-      where: {
-        agentId,
-        tenantId,
-        tool: { name: toolCall.name },
-      },
+    // Try to find via AgentTool junction first (explicit binding with whenToUse metadata)
+    let tool = await prisma.agentTool.findFirst({
+      where: { agentId, tenantId, tool: { name: toolCall.name } },
       include: { tool: true },
-    });
+    }).then((at) => at?.tool ?? null);
 
-    if (!agentTool) {
+    // Fall back to toolkit-sourced tools
+    if (!tool) {
+      const toolkitSubs = await prisma.agentToolkit.findMany({
+        where: { agentId, tenantId },
+        include: {
+          tag: {
+            include: { tools: { include: { tool: true } } },
+          },
+        },
+      });
+      for (const sub of toolkitSubs) {
+        const found = sub.tag.tools.find((a) => a.tool.name === toolCall.name);
+        if (found) { tool = found.tool; break; }
+      }
+    }
+
+    if (!tool) {
       return {
         toolCallId: toolCall.id,
         name: toolCall.name,
@@ -76,8 +122,6 @@ export async function executeToolCall(
         durationMs: Date.now() - startTime,
       };
     }
-
-    const tool = agentTool.tool;
 
     // Basic required-field validation against inputSchema
     const schema = tool.inputSchema as { required?: string[] } | null;
@@ -102,6 +146,7 @@ export async function executeToolCall(
       tenantId,
       agentId,
       conversationId: context?.conversationId,
+      source: 'CHAT',
     };
 
     const rawResult = await executor.executeTool(tool.id, execContext, toolCall.arguments);
@@ -117,7 +162,6 @@ export async function executeToolCall(
     let resultString: string;
 
     if (importMeta?.responseMapping?.summaryTemplate) {
-      // Interpolate template with response data
       resultString = importMeta.responseMapping.summaryTemplate.replace(
         /\{\{([^}]+)\}\}/g,
         (_, path: string) => {
@@ -126,7 +170,6 @@ export async function executeToolCall(
         },
       );
     } else if (importMeta?.responseMapping?.extractFields?.length) {
-      // Pick only specified fields
       const extracted: Record<string, unknown> = {};
       for (const field of importMeta.responseMapping.extractFields) {
         extracted[field] = _get(rawResult, field);

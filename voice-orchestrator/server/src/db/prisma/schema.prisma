@@ -204,6 +204,7 @@ model Agent {
   postCallActions PostCallAction[]
   conversations   Conversation[]
   agentTools      AgentTool[]
+  agentToolkits   AgentToolkit[]
 
   @@unique([tenantId, providerAgentId])
   @@index([tenantId])
@@ -285,6 +286,10 @@ model Tool {
   importMeta      Json?        @map("import_meta")
   /// Optional FK to shared credential. If set, overrides inline authType/authConfig.
   credentialId    String?      @map("credential_id")
+  /// Max calls per minute across all sources. Null = unlimited.
+  rateLimitPerMinute  Int?     @map("rate_limit_per_minute")
+  /// Cache tool responses for this many seconds. Null = no caching.
+  cacheTtlSeconds     Int?     @map("cache_ttl_seconds")
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
@@ -445,6 +450,23 @@ model AgentTool {
   @@map("agent_tools")
 }
 
+/// Junction table: agent subscribes to an entire toolkit (ToolTag with isToolkit=true).
+/// All active tools with that tag are included in the agent's effective tool list.
+model AgentToolkit {
+  id        String   @id @default(uuid())
+  tenantId  String
+  agentId   String
+  tagId     String
+  createdAt DateTime @default(now())
+
+  agent Agent   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  tag   ToolTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, tagId])
+  @@index([tenantId, agentId])
+  @@map("agent_toolkits")
+}
+
 /// Tenant-specific API keys for LLM providers (apiKey encrypted at rest).
 /// Mirrors the ProviderCredential pattern.
 model LLMCredential {
@@ -505,15 +527,19 @@ model ToolCredential {
   @@map("tool_credentials")
 }
 
-/// Tags for organizing tools.
+/// Tags for organizing tools. When isToolkit=true, agents can subscribe to
+/// the full tag as a single bundle (AgentToolkit junction).
 model ToolTag {
-  id        String   @id @default(uuid())
-  tenantId  String
-  name      String
-  color     String?
-  createdAt DateTime @default(now())
+  id         String   @id @default(uuid())
+  tenantId   String
+  name       String
+  color      String?
+  /// When true this tag acts as a toolkit — agents subscribe to it wholesale.
+  isToolkit  Boolean  @default(false) @map("is_toolkit")
+  createdAt  DateTime @default(now())
 
-  tools ToolTagAssignment[]
+  tools              ToolTagAssignment[]
+  agentSubscriptions AgentToolkit[]
 
   @@unique([tenantId, name])
   @@index([tenantId])
@@ -573,4 +599,50 @@ model AuditLog {
   @@index([tenantId, userId])
   @@index([tenantId, resource])
   @@map("audit_logs")
+}
+
+/// Immutable log of every tool execution (chat, MCP, test, dry-run).
+model ToolExecution {
+  id              String   @id @default(uuid())
+  tenantId        String
+  toolId          String
+  toolName        String   /// Denormalized for fast querying without join
+  agentId         String?
+  conversationId  String?
+  mcpKeyId        String?
+  userId          String?  /// Who triggered it (for TEST/DRY_RUN)
+
+  /// How this execution was triggered.
+  source          String   /// "CHAT" | "MCP" | "VOICE" | "TEST" | "DRY_RUN"
+
+  /// Request details (what was sent)
+  requestUrl      String?
+  requestMethod   String?
+  requestHeaders  Json?    /// Masked — no raw secrets
+  requestBody     Json?
+
+  /// Response details (what came back)
+  responseStatus  Int?
+  responseBody    String?  @db.Text  /// Truncated to 10KB max
+  responseHeaders Json?
+
+  /// Execution metadata
+  latencyMs       Int
+  success         Boolean
+  errorMessage    String?  @db.Text
+  cached          Boolean  @default(false) /// Was this served from cache?
+  retryCount      Int      @default(0)
+
+  /// Credential used (denormalized for audit)
+  credentialId    String?
+  credentialName  String?
+  authType        String?  /// "NONE" | "BEARER" | "API_KEY" | "PLATFORM" | "OAUTH"
+
+  createdAt       DateTime @default(now())
+
+  @@index([tenantId, toolId, createdAt])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, agentId, createdAt])
+  @@index([tenantId, source, createdAt])
+  @@map("tool_executions")
 }

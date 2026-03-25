@@ -30,6 +30,12 @@ import {
   detachTool,
   bulkAttachTools,
 } from '../../tools/agentTool.controller';
+import {
+  subscribeToolkit,
+  unsubscribeToolkit,
+  listAgentToolkits,
+  getEffectiveTools,
+} from '../../tools/agentToolkit.controller';
 
 export const agentRouter = Router();
 
@@ -58,10 +64,16 @@ agentRouter.post('/:id/chat', requirePermission('voiceai.agents.execute'), chatW
 
 // ── Agent-Tool junction routes ───────────────────────────────────────────────
 agentRouter.post('/:id/tools/bulk', requirePermission('voiceai.tools.edit'), bulkAttachTools);
+agentRouter.get('/:id/tools/effective', requirePermission('voiceai.tools.view'), getEffectiveTools);
 agentRouter.post('/:id/tools', requirePermission('voiceai.tools.edit'), attachTool);
 agentRouter.get('/:id/tools', requirePermission('voiceai.tools.view'), listAgentTools);
 agentRouter.put('/:id/tools/:toolId', requirePermission('voiceai.tools.edit'), updateAgentTool);
 agentRouter.delete('/:id/tools/:toolId', requirePermission('voiceai.tools.edit'), detachTool);
+
+// ── Agent-Toolkit (tag subscription) routes ──────────────────────────────────
+agentRouter.get('/:id/toolkits', requirePermission('voiceai.tools.view'), listAgentToolkits);
+agentRouter.post('/:id/toolkits', requirePermission('voiceai.tools.edit'), subscribeToolkit);
+agentRouter.delete('/:id/toolkits/:tagId', requirePermission('voiceai.tools.edit'), unsubscribeToolkit);
 
 // ── Post-call action routes (must come before /:id to avoid conflicts) ────────
 // Static sub-routes first

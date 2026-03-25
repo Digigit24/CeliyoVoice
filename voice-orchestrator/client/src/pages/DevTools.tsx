@@ -1,6 +1,12 @@
 import { useState } from 'react';
-import { Play, Loader2, ChevronDown, ChevronRight, Copy, Check } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { Play, Loader2, ChevronDown, ChevronRight, Copy, Check, Wrench, Zap, CheckCircle2, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { api } from '@/lib/axios';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -442,41 +448,245 @@ function ProviderPanel({ provider }: { provider: Provider }) {
   );
 }
 
+// ── Tool Playground ───────────────────────────────────────────────────────────
+
+interface ToolItem {
+  id: string;
+  name: string;
+  description: string;
+  toolType: string;
+  inputSchema: Record<string, unknown> | null;
+  method: string;
+  endpoint: string | null;
+}
+
+interface PlaygroundResult {
+  success: boolean;
+  latencyMs: number;
+  data?: unknown;
+  error?: string;
+}
+
+function ToolPlayground() {
+  const [selectedToolId, setSelectedToolId] = useState('');
+  const [argsJson, setArgsJson] = useState('{}');
+  const [result, setResult] = useState<PlaygroundResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [argsError, setArgsError] = useState<string | null>(null);
+  const [source, setSource] = useState('TEST');
+
+  const { data: toolsData } = useQuery<{ data: ToolItem[] }>({
+    queryKey: ['tools-playground'],
+    queryFn: () => api.get('/tools', { params: { limit: 200 } }).then((r) => r.data),
+  });
+
+  const tools = toolsData?.data ?? [];
+  const selectedTool = tools.find((t) => t.id === selectedToolId);
+
+  const handleRun = async () => {
+    setArgsError(null);
+    setResult(null);
+    let args: Record<string, unknown>;
+    try {
+      args = JSON.parse(argsJson);
+    } catch (e) {
+      setArgsError((e as Error).message);
+      return;
+    }
+    setLoading(true);
+    const start = Date.now();
+    try {
+      const { data } = await api.post(`/tools/${selectedToolId}/execute`, { args, source });
+      setResult({ success: true, latencyMs: Date.now() - start, data: data.data });
+    } catch (err) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? String(err);
+      setResult({ success: false, latencyMs: Date.now() - start, error: msg });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Build schema hint from inputSchema
+  const schemaHint = selectedTool?.inputSchema
+    ? JSON.stringify(
+        Object.fromEntries(
+          Object.entries(
+            (selectedTool.inputSchema as { properties?: Record<string, { type: string; description?: string }> })?.properties ?? {},
+          ).map(([k, v]) => [k, v.type === 'string' ? '' : v.type === 'number' ? 0 : null]),
+        ),
+        null, 2,
+      )
+    : '{}';
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <Zap className="h-4 w-4" /> Tool Dry-Run Playground
+        </CardTitle>
+        <CardDescription>
+          Execute any tool in TEST or DRY_RUN mode without affecting live data. Results are logged in History.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-2">
+            <Label>Tool</Label>
+            <Select value={selectedToolId} onValueChange={(v) => { setSelectedToolId(v); setArgsJson(schemaHint); setResult(null); }}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a tool..." />
+              </SelectTrigger>
+              <SelectContent>
+                {tools.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    <span className="font-mono text-xs">{t.name}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Mode</Label>
+            <Select value={source} onValueChange={setSource}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="TEST">TEST — real execution, logged</SelectItem>
+                <SelectItem value="DRY_RUN">DRY_RUN — validate only</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {selectedTool && (
+          <div className="rounded-lg border bg-muted/30 p-3 text-xs">
+            <div className="flex items-center gap-2 mb-1">
+              <Wrench className="h-3 w-3 text-muted-foreground" />
+              <span className="font-mono font-medium">{selectedTool.name}</span>
+              <Badge variant="outline" className="text-[10px]">{selectedTool.toolType}</Badge>
+              {selectedTool.endpoint && <span className="text-muted-foreground truncate">{selectedTool.method} {selectedTool.endpoint}</span>}
+            </div>
+            <p className="text-muted-foreground">{selectedTool.description}</p>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label>Arguments (JSON)</Label>
+            {selectedTool?.inputSchema && (
+              <button
+                className="text-[11px] text-primary hover:underline"
+                onClick={() => setArgsJson(schemaHint)}
+              >
+                Fill from schema
+              </button>
+            )}
+          </div>
+          <Textarea
+            value={argsJson}
+            onChange={(e) => setArgsJson(e.target.value)}
+            rows={6}
+            className="font-mono text-xs"
+            placeholder="{}"
+          />
+          {argsError && <p className="text-xs text-destructive">{argsError}</p>}
+        </div>
+
+        <Button onClick={handleRun} disabled={!selectedToolId || loading} className="w-full">
+          {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+          Run Tool
+        </Button>
+
+        {result && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm">
+              {result.success ? (
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+              ) : (
+                <XCircle className="h-4 w-4 text-destructive" />
+              )}
+              <span className={result.success ? 'text-green-600 dark:text-green-400' : 'text-destructive'}>
+                {result.success ? 'Success' : 'Failed'}
+              </span>
+              <span className="text-xs text-muted-foreground ml-auto font-mono">{result.latencyMs}ms</span>
+            </div>
+            {result.error && (
+              <div className="rounded border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive font-mono">
+                {result.error}
+              </div>
+            )}
+            {result.data !== undefined && (
+              <div className="relative rounded-md bg-zinc-900 dark:bg-zinc-950 p-3">
+                <pre className="overflow-x-auto text-xs text-zinc-100 leading-relaxed max-h-48">
+                  {JSON.stringify(result.data, null, 2)}
+                </pre>
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
+
+type DevTab = 'provider' | 'playground';
 
 export default function DevTools() {
   const [activeProvider, setActiveProvider] = useState<Provider>('omnidim');
+  const [activeTab, setActiveTab] = useState<DevTab>('provider');
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">Developer Tools</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Test provider API endpoints directly using your tenant's stored credentials.
+          Test provider API endpoints and tool execution directly from the console.
         </p>
       </div>
 
-      {/* Provider tab switcher */}
+      {/* Top tabs */}
       <div className="flex gap-1 rounded-lg bg-muted p-1 w-fit">
-        {(['omnidim', 'bolna'] as Provider[]).map((p) => (
+        {(['provider', 'playground'] as DevTab[]).map((t) => (
           <button
-            key={p}
-            onClick={() => setActiveProvider(p)}
+            key={t}
+            onClick={() => setActiveTab(t)}
             className={`rounded-md px-4 py-1.5 text-sm font-medium capitalize transition-colors ${
-              activeProvider === p
-                ? 'bg-background shadow-sm text-foreground'
-                : 'text-muted-foreground hover:text-foreground'
+              activeTab === t ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            {p === 'omnidim' ? 'Omnidim' : 'Bolna'}
+            {t === 'provider' ? 'Provider API' : 'Tool Playground'}
           </button>
         ))}
       </div>
 
-      {activeProvider === 'omnidim'
-        ? <ProviderPanel key="omnidim" provider="omnidim" />
-        : <ProviderPanel key="bolna" provider="bolna" />
-      }
+      {activeTab === 'playground' ? (
+        <ToolPlayground />
+      ) : (
+        <>
+          {/* Provider tab switcher */}
+          <div className="flex gap-1 rounded-lg bg-muted p-1 w-fit">
+            {(['omnidim', 'bolna'] as Provider[]).map((p) => (
+              <button
+                key={p}
+                onClick={() => setActiveProvider(p)}
+                className={`rounded-md px-4 py-1.5 text-sm font-medium capitalize transition-colors ${
+                  activeProvider === p
+                    ? 'bg-background shadow-sm text-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {p === 'omnidim' ? 'Omnidim' : 'Bolna'}
+              </button>
+            ))}
+          </div>
+
+          {activeProvider === 'omnidim'
+            ? <ProviderPanel key="omnidim" provider="omnidim" />
+            : <ProviderPanel key="bolna" provider="bolna" />
+          }
+        </>
+      )}
     </div>
   );
 }

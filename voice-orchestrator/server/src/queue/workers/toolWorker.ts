@@ -19,7 +19,7 @@ export function startToolWorker(): Worker<ToolJobData, void, string> {
       try {
         const result = await executor.executeTool(
           toolId,
-          { callId, tenantId, providerCallId },
+          { callId, tenantId, providerCallId, source: 'VOICE' },
           parameters,
         );
 

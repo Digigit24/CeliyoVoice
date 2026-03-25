@@ -144,6 +144,7 @@ export function parseCeliyoFile(input: unknown): ParseResult {
         category: raw.category,
         timeout: raw.timeout ?? 30,
         retries: raw.retries ?? 0,
+        rateLimitPerMinute: file.rateLimit?.maxPerMinute ?? undefined,
         source: 'CELIYO_IMPORT',
         importMeta: {
           collectionName,
