@@ -225,7 +225,7 @@ function BoolBadge({ value, trueLabel = 'Yes', falseLabel = 'No' }: { value: unk
   );
 }
 
-function SectionCard({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
+function SectionCard({ icon, title, children }: { icon: React.ReactNode; title: React.ReactNode; children: React.ReactNode }) {
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -675,7 +675,7 @@ function ProviderConfigTab({ agentId }: { agentId: string }) {
       ) : bolnaCfgP ? (
         // ── Bolna config layout ──────────────────────────────────────────
         <BolnaConfigView cfg={bolnaCfgP} />
-      ) : (
+      ) : cfg ? (
         <div className="grid gap-4 md:grid-cols-2">
           {/* Voice */}
           <SectionCard icon={<Mic className="h-4 w-4" />} title="Voice">
@@ -786,7 +786,7 @@ function ProviderConfigTab({ agentId }: { agentId: string }) {
                         ))}
                       </div>
                     )}
-                    {pc.webhook_url && pc.webhook_url !== false && (
+                    {pc.webhook_url && typeof pc.webhook_url === 'string' && (
                       <InfoRow label="Webhook" value={<span className="font-mono text-xs break-all">{String(pc.webhook_url)}</span>} />
                     )}
                   </div>
@@ -804,7 +804,7 @@ function ProviderConfigTab({ agentId }: { agentId: string }) {
             </Collapsible>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
