@@ -9,6 +9,7 @@ import { VoiceEventType } from '../../events/eventTypes';
 import { logger } from '../../utils/logger';
 import type { NormalizedWebhookEvent } from '../../providers/interfaces/voiceProvider.interface';
 import { PostCallService } from '../../postCall/postCall.service';
+import { forwardToSmartHR } from '../../webhooks/smarthr.forwarder';
 
 export function startWebhookWorker(): Worker<WebhookJobData, void, string> {
   const worker = new Worker<WebhookJobData, void, string>(
@@ -123,16 +124,20 @@ async function dispatchNormalizedEvent(
       const prisma = await getPrismaClient(tenantId);
       const call = await prisma.call.findUnique({ where: { id: callId } });
       await publish({ ...base, type: VoiceEventType.CALL_STARTED, agentId: call?.agentId ?? '', phone: call?.phone ?? '' });
+      void forwardToSmartHR({ call_id: callId, status: 'in_progress' });
       break;
     }
     case 'CALL_RINGING':
       await publish({ ...base, type: VoiceEventType.CALL_RINGING });
+      void forwardToSmartHR({ call_id: callId, status: 'ringing' });
       break;
     case 'CALL_CONNECTED':
       await publish({ ...base, type: VoiceEventType.CALL_CONNECTED });
+      void forwardToSmartHR({ call_id: callId, status: 'in_progress' });
       break;
     case 'CALL_ENDED':
       await publish({ ...base, type: VoiceEventType.CALL_ENDED, duration: normalized.duration, recordingUrl: normalized.recordingUrl });
+      // Terminal forwarding (with transcript + score) is handled by PostCallService.
       break;
     case 'TRANSCRIPT_UPDATE':
       if (normalized.transcript) await publish({ ...base, type: VoiceEventType.TRANSCRIPT_UPDATE, transcript: normalized.transcript });
@@ -147,6 +152,7 @@ async function dispatchNormalizedEvent(
       const prisma = await getPrismaClient(tenantId);
       await prisma.call.update({ where: { id: callId }, data: { status: CallStatus.FAILED } });
       await publish({ ...base, type: VoiceEventType.ERROR, error: 'Provider error', fatal: true });
+      void forwardToSmartHR({ call_id: callId, status: 'failed' });
       break;
     }
     default:

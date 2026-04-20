@@ -40,6 +40,13 @@ const envSchema = z.object({
 
   // CORS
   CORS_ALLOWED_ORIGINS: z.string().default('http://localhost:5173,http://localhost:3000'),
+
+  // SmartHR event forwarding — downstream consumer that needs call-status updates
+  SMARTHR_WEBHOOK_BASE_URL: z.string().url().default('https://smart-hr.celiyo.com'),
+  SMARTHR_WEBHOOK_STATUS_PATH: z.string().default('/webhooks/voice/call-status/'),
+  SMARTHR_WEBHOOK_COMPLETED_PATH: z.string().default('/webhooks/voice/call-completed/'),
+  SMARTHR_WEBHOOK_SECRET: z.string().default(''),
+  SMARTHR_WEBHOOK_TIMEOUT_MS: z.string().regex(/^\d+$/).transform(Number).default('10000'),
 });
 
 export type Env = z.infer<typeof envSchema>;

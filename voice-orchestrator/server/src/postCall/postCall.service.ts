@@ -7,6 +7,7 @@ import { normalizeOmnidimPostCall } from '../providers/omnidim/omnidim.postCall'
 import { normalizeBolnaPostCall } from '../providers/bolna/bolna.postCall';
 import type { VoiceProvider } from '@prisma/client';
 import { logger } from '../utils/logger';
+import { forwardToSmartHR, type SmartHRStatus, type SmartHRScore } from '../webhooks/smarthr.forwarder';
 
 // ── Registry of per-provider normalizers ──────────────────────────────────────
 
@@ -115,6 +116,18 @@ export class PostCallService {
     });
 
     logger.info({ callId: call.id, sentiment: data.sentiment }, 'Post-call data saved to Call');
+
+    // ── Forward terminal event to SmartHR (call_id = our internal Call.id) ────
+    const score = extractScore(data);
+    void forwardToSmartHR({
+      call_id: call.id,
+      status: smartHRStatusFromProvider(data.callStatus),
+      ...(data.durationSeconds !== undefined ? { duration: data.durationSeconds } : {}),
+      ...(data.transcript ? { transcript: data.transcript } : {}),
+      ...(data.recordingUrl ? { recording_url: data.recordingUrl } : {}),
+      ...(data.summary ? { summary: data.summary } : {}),
+      ...(score ? { score } : {}),
+    });
 
     // ── Step 3: find the agent and execute configured actions ─────────────────
     const actions = await this.prisma.postCallAction.findMany({
@@ -339,4 +352,43 @@ export class PostCallService {
     if (s === 'cancelled') return 'CANCELLED';
     return undefined;
   }
+}
+
+// ── SmartHR forwarding helpers ────────────────────────────────────────────────
+
+function smartHRStatusFromProvider(providerStatus?: string): SmartHRStatus {
+  const s = providerStatus?.toLowerCase();
+  if (s === 'completed') return 'completed';
+  if (s === 'busy') return 'busy';
+  if (s === 'no-answer' || s === 'no_answer') return 'no_answer';
+  // Anything else terminal (failed / cancelled / unknown) maps to failed.
+  return 'failed';
+}
+
+/**
+ * Pulls a SmartHR-shaped score object out of the normalized post-call data.
+ * Omnidim / Bolna do not expose structured scoring today, so we surface
+ * whatever has been persisted in extractedVariables.score if present. The
+ * shape is intentionally permissive — downstream consumers may ignore it.
+ */
+function extractScore(data: NormalizedPostCallData): SmartHRScore | undefined {
+  const raw = data.extractedVariables?.['score'];
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const r = raw as Record<string, unknown>;
+
+  const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
+  const strArr = (v: unknown): string[] | undefined =>
+    Array.isArray(v) && v.every((x) => typeof x === 'string') ? (v as string[]) : undefined;
+
+  const score: SmartHRScore = {
+    ...(num(r['communication']) !== undefined ? { communication: num(r['communication']) } : {}),
+    ...(num(r['knowledge']) !== undefined ? { knowledge: num(r['knowledge']) } : {}),
+    ...(num(r['confidence']) !== undefined ? { confidence: num(r['confidence']) } : {}),
+    ...(num(r['relevance']) !== undefined ? { relevance: num(r['relevance']) } : {}),
+    ...(num(r['overall']) !== undefined ? { overall: num(r['overall']) } : {}),
+    ...(strArr(r['strengths']) ? { strengths: strArr(r['strengths']) } : {}),
+    ...(strArr(r['weaknesses']) ? { weaknesses: strArr(r['weaknesses']) } : {}),
+  };
+
+  return Object.keys(score).length > 0 ? score : undefined;
 }
