@@ -98,6 +98,7 @@ export class PostCallService {
     const tenantId = call.tenantId;
 
     // ── Step 2: update Call with post-call data ───────────────────────────────
+    const endedAt = call.endedAt ?? new Date();
     await this.prisma.call.update({
       where: { id: call.id },
       data: {
@@ -111,7 +112,7 @@ export class PostCallService {
           ? (data.extractedVariables as Prisma.InputJsonValue)
           : undefined,
         cost: data.cost != null ? new Prisma.Decimal(data.cost) : undefined,
-        endedAt: call.endedAt ?? new Date(),
+        endedAt,
       },
     });
 
@@ -119,14 +120,24 @@ export class PostCallService {
 
     // ── Forward terminal event to SmartHR (call_id = our internal Call.id) ────
     const score = extractScore(data);
+    const status = smartHRStatusFromProvider(data.callStatus);
+    // Spec: duration=0 when the candidate never picked up (no_answer / busy).
+    const duration =
+      data.durationSeconds ?? (status === 'no_answer' || status === 'busy' ? 0 : undefined);
+
     void forwardToSmartHR({
       call_id: call.id,
-      status: smartHRStatusFromProvider(data.callStatus),
-      ...(data.durationSeconds !== undefined ? { duration: data.durationSeconds } : {}),
+      status,
+      ...(duration !== undefined ? { duration } : {}),
+      ...(call.startedAt ? { started_at: call.startedAt.toISOString() } : {}),
+      ended_at: endedAt.toISOString(),
       ...(data.transcript ? { transcript: data.transcript } : {}),
       ...(data.recordingUrl ? { recording_url: data.recordingUrl } : {}),
       ...(data.summary ? { summary: data.summary } : {}),
       ...(score ? { score } : {}),
+      ...(status !== 'completed' && data.callStatus
+        ? { error_message: data.callStatus }
+        : {}),
     });
 
     // ── Step 3: find the agent and execute configured actions ─────────────────

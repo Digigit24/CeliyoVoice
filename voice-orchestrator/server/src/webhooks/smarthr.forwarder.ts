@@ -33,17 +33,25 @@ export interface SmartHRScore {
   overall?: number;
   strengths?: string[];
   weaknesses?: string[];
+  detailed_feedback?: Record<string, unknown>;
 }
 
 export interface SmartHRPayload {
   /** Our internal Call.id — equal to what POST /api/v1/calls/start returned. */
   call_id: string;
   status: SmartHRStatus;
+  /** Seconds of actual talk time (in_progress → hangup). 0 if never picked up. */
   duration?: number;
+  /** ISO-8601 UTC — when the candidate picked up. */
+  started_at?: string;
+  /** ISO-8601 UTC — when the call ended. */
+  ended_at?: string;
   transcript?: string;
   recording_url?: string;
   summary?: string;
   score?: SmartHRScore;
+  /** Short reason string for failed / no_answer / busy (optional). */
+  error_message?: string;
 }
 
 /** Terminal statuses go to the call-completed endpoint; the rest to call-status. */

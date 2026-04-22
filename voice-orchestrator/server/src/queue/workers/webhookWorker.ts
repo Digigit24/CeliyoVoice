@@ -124,7 +124,7 @@ async function dispatchNormalizedEvent(
       const prisma = await getPrismaClient(tenantId);
       const call = await prisma.call.findUnique({ where: { id: callId } });
       await publish({ ...base, type: VoiceEventType.CALL_STARTED, agentId: call?.agentId ?? '', phone: call?.phone ?? '' });
-      void forwardToSmartHR({ call_id: callId, status: 'in_progress' });
+      void forwardToSmartHR({ call_id: callId, status: 'in_progress', started_at: base.timestamp });
       break;
     }
     case 'CALL_RINGING':
@@ -133,7 +133,7 @@ async function dispatchNormalizedEvent(
       break;
     case 'CALL_CONNECTED':
       await publish({ ...base, type: VoiceEventType.CALL_CONNECTED });
-      void forwardToSmartHR({ call_id: callId, status: 'in_progress' });
+      void forwardToSmartHR({ call_id: callId, status: 'in_progress', started_at: base.timestamp });
       break;
     case 'CALL_ENDED':
       await publish({ ...base, type: VoiceEventType.CALL_ENDED, duration: normalized.duration, recordingUrl: normalized.recordingUrl });
@@ -152,7 +152,12 @@ async function dispatchNormalizedEvent(
       const prisma = await getPrismaClient(tenantId);
       await prisma.call.update({ where: { id: callId }, data: { status: CallStatus.FAILED } });
       await publish({ ...base, type: VoiceEventType.ERROR, error: 'Provider error', fatal: true });
-      void forwardToSmartHR({ call_id: callId, status: 'failed' });
+      void forwardToSmartHR({
+        call_id: callId,
+        status: 'failed',
+        ended_at: base.timestamp,
+        error_message: 'Provider error',
+      });
       break;
     }
     default:
