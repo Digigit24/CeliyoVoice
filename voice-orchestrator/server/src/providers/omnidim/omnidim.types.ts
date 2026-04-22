@@ -97,7 +97,15 @@ export interface OmnidimDispatchCallPayload {
 }
 
 export interface OmnidimDispatchCallResponse {
+  /**
+   * Omnidim's actual dispatch response returns `requestId` (camelCase) as the
+   * identifier — this is the value that shows up later in post-call payloads
+   * as `call_request_id.id`. Older doc versions referenced `call_id`/`id`, so
+   * we accept all three and prefer `requestId` when present.
+   */
+  requestId?: string | number;
   call_id?: string | number;
+  id?: string | number;
   status?: string;
   message?: string;
   success?: boolean;
