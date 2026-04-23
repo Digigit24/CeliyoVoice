@@ -67,11 +67,23 @@ export async function ingestWebhook(
     }
   }
 
-  // Persist raw event immediately (before queuing)
+  // Persist raw event immediately (before queuing).
+  // Omnidim sends numeric ids (e.g. call_id: 33302, call_request_id: 87198);
+  // our Prisma column is String, so coerce. Prefer call_request_id since that
+  // is the same integer we store at dispatch time as providerCallId.
+  const rawProviderCallId =
+    payload['call_request_id'] ??
+    payload['call_id'] ??
+    payload['callId'] ??
+    null;
   const providerCallId =
-    (payload['call_id'] as string | undefined) ??
-    (payload['callId'] as string | undefined) ??
-    undefined;
+    rawProviderCallId != null && typeof rawProviderCallId !== 'object'
+      ? String(rawProviderCallId)
+      : rawProviderCallId != null &&
+          typeof rawProviderCallId === 'object' &&
+          (rawProviderCallId as Record<string, unknown>)['id'] != null
+        ? String((rawProviderCallId as Record<string, unknown>)['id'])
+        : undefined;
 
   const eventType =
     (payload['event'] as string | undefined) ??

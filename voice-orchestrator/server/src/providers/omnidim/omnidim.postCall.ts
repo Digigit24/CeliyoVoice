@@ -28,15 +28,18 @@ export const normalizeOmnidimPostCall: PostCallNormalizer = (
   if (!isPostCallEvent) return null;
 
   // ── Extract fields ────────────────────────────────────────────────────────
-  // The call log `id` is the Omnidim call-log row ID.
-  // `call_request_id.id` is the dispatch request ID — this matches what
-  // Omnidim returns in the dispatch response and what we store as providerCallId.
+  // `call_request_id` is the dispatch request ID — matches what we store as
+  // providerCallId. Omnidim sends it either as a bare integer (post-call
+  // webhook payload) or as a nested { id } object (call-log export shape).
+  const crRaw = raw['call_request_id'];
   const callRequestId =
-    raw['call_request_id'] != null &&
-    typeof raw['call_request_id'] === 'object' &&
-    (raw['call_request_id'] as Record<string, unknown>)['id']
-      ? String((raw['call_request_id'] as Record<string, unknown>)['id'])
-      : undefined;
+    crRaw != null && typeof crRaw !== 'object'
+      ? String(crRaw)
+      : crRaw != null &&
+          typeof crRaw === 'object' &&
+          (crRaw as Record<string, unknown>)['id'] != null
+        ? String((crRaw as Record<string, unknown>)['id'])
+        : undefined;
 
   const id = callRequestId ?? (raw['id'] != null ? String(raw['id']) : undefined);
 
