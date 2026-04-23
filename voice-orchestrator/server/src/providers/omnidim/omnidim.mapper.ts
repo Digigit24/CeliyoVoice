@@ -66,31 +66,70 @@ export function fromOmnidimCall(resp: OmnidimCallResponse): ProviderCallResponse
 }
 
 export function fromOmnidimWebhook(payload: OmnidimWebhookPayload): NormalizedWebhookEvent {
+  // Omnidim ships two webhook shapes:
+  //   (A) Real-time event shape:      { event, call_id, data: {...} }
+  //   (B) Post-call summary shape:    { call_id, call_request_id, call_status, call_duration, call_report: {...} }
+  // The post-call shape has no `event` field, so we infer one from call_status.
+  const raw = payload as unknown as Record<string, unknown>;
+  const rawEvent = typeof raw['event'] === 'string' ? (raw['event'] as string) : undefined;
+  const callStatus =
+    typeof raw['call_status'] === 'string' ? (raw['call_status'] as string) : undefined;
+
+  // Prefer call_request_id (matches the dispatch `requestId` we already store
+  // as providerCallId); fall back to call_id. Coerce either to string.
+  const idSource = raw['call_request_id'] ?? raw['call_id'];
+  const providerCallId =
+    idSource != null && typeof idSource !== 'object'
+      ? String(idSource)
+      : idSource != null &&
+          typeof idSource === 'object' &&
+          (idSource as Record<string, unknown>)['id'] != null
+        ? String((idSource as Record<string, unknown>)['id'])
+        : '';
+
   const event: NormalizedWebhookEvent = {
     provider: 'OMNIDIM',
-    eventType: normalizeOmnidimEvent(payload.event),
-    providerCallId: payload.call_id,
-    internalCallId: payload.reference_id,
-    raw: payload as unknown as Record<string, unknown>,
+    eventType: normalizeOmnidimEvent(rawEvent, callStatus),
+    providerCallId,
+    internalCallId: typeof raw['reference_id'] === 'string' ? (raw['reference_id'] as string) : undefined,
+    raw,
   };
 
-  if (payload.data.transcript) event.transcript = payload.data.transcript;
-  if (payload.data.summary) event.summary = payload.data.summary;
-  if (payload.data.duration !== undefined) event.duration = payload.data.duration;
-  if (payload.data.recording_url) event.recordingUrl = payload.data.recording_url;
+  // Real-time shape: data.{transcript,summary,duration,recording_url,tool_*}
+  const data = (raw['data'] ?? {}) as Record<string, unknown>;
+  if (typeof data['transcript'] === 'string') event.transcript = data['transcript'] as string;
+  if (typeof data['summary'] === 'string') event.summary = data['summary'] as string;
+  if (typeof data['duration'] === 'number') event.duration = data['duration'] as number;
+  if (typeof data['recording_url'] === 'string') event.recordingUrl = data['recording_url'] as string;
 
-  if (payload.data.tool_name) {
+  // Post-call shape: flat fields on payload + nested call_report
+  if (event.duration === undefined && typeof raw['call_duration'] === 'number') {
+    event.duration = raw['call_duration'] as number;
+  }
+  const report = (raw['call_report'] ?? {}) as Record<string, unknown>;
+  if (!event.transcript && typeof report['full_conversation'] === 'string') {
+    event.transcript = report['full_conversation'] as string;
+  }
+  if (!event.summary && typeof report['summary'] === 'string') {
+    event.summary = report['summary'] as string;
+  }
+  if (!event.recordingUrl && typeof raw['recording_url'] === 'string') {
+    event.recordingUrl = raw['recording_url'] as string;
+  }
+
+  if (typeof data['tool_name'] === 'string') {
     event.toolRequest = {
-      toolName: payload.data.tool_name,
-      parameters: payload.data.tool_parameters ?? {},
-      requestId: payload.data.tool_request_id ?? `${payload.call_id}-tool`,
+      toolName: data['tool_name'] as string,
+      parameters: (data['tool_parameters'] ?? {}) as Record<string, unknown>,
+      requestId:
+        (data['tool_request_id'] as string | undefined) ?? `${providerCallId}-tool`,
     };
   }
 
   return event;
 }
 
-function normalizeOmnidimEvent(event: string): string {
+function normalizeOmnidimEvent(event: string | undefined, callStatus?: string): string {
   const map: Record<string, string> = {
     'call.started': 'CALL_STARTED',
     'call.ringing': 'CALL_RINGING',
@@ -105,5 +144,11 @@ function normalizeOmnidimEvent(event: string): string {
     'tool.failed': 'TOOL_FAILED',
     'agent.action': 'AGENT_ACTION',
   };
-  return map[event.toLowerCase()] ?? event.toUpperCase();
+  if (event) return map[event.toLowerCase()] ?? event.toUpperCase();
+
+  // No event field — fall back to call_status from post-call shape.
+  const s = callStatus?.toLowerCase();
+  if (s === 'completed') return 'CALL_ENDED';
+  if (s === 'failed' || s === 'busy' || s === 'no-answer' || s === 'no_answer') return 'ERROR';
+  return 'UNKNOWN';
 }
