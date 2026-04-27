@@ -57,22 +57,35 @@ async function handleCallEnded(event: VoiceEvent): Promise<void> {
   const prisma = await getPrismaClient(event.tenantId);
   const now = new Date();
 
+  // Providers occasionally send non-string values (e.g. Omnidim ships
+  // recording_url=false on declined / no-answer calls). Drop anything that
+  // isn't a real value before passing to Prisma — otherwise the whole update
+  // is rejected and the call row never reaches COMPLETED.
+  const duration =
+    typeof event.duration === 'number' && Number.isFinite(event.duration)
+      ? event.duration
+      : undefined;
+  const recordingUrl =
+    typeof event.recordingUrl === 'string' && event.recordingUrl.length > 0
+      ? event.recordingUrl
+      : undefined;
+
   await prisma.call.update({
     where: { id: event.callId },
     data: {
       status: CallStatus.COMPLETED,
       endedAt: now,
-      duration: event.duration,
-      recordingUrl: event.recordingUrl,
+      ...(duration !== undefined ? { duration } : {}),
+      ...(recordingUrl !== undefined ? { recordingUrl } : {}),
     },
   });
 
   await saveCallEvent(prisma, event.callId, event.tenantId, 'CALL_ENDED', {
-    duration: event.duration,
-    recordingUrl: event.recordingUrl,
+    duration,
+    recordingUrl,
   });
 
-  logger.info({ callId: event.callId, duration: event.duration }, 'Call completed');
+  logger.info({ callId: event.callId, duration }, 'Call completed');
 }
 
 async function handleTranscriptFinal(event: VoiceEvent): Promise<void> {
