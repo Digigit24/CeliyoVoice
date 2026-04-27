@@ -58,10 +58,22 @@ export const normalizeOmnidimPostCall: PostCallNormalizer = (
         ? raw['duration']
         : undefined;
 
-  // recording_url may be relative — prefer the full internal_recording_url
+  // recording_url may be relative — prefer the full internal_recording_url.
+  // Omnidim sends `false` (boolean) on declined / no-answer calls for both
+  // recording fields, so accept only string values.
+  const internalRecording = raw['internal_recording_url'];
+  const externalRecording = raw['recording_url'];
   const recordingUrl =
-    (raw['internal_recording_url'] as string | undefined) ??
-    (raw['recording_url'] as string | undefined);
+    typeof internalRecording === 'string' && internalRecording.length > 0
+      ? internalRecording
+      : typeof externalRecording === 'string' && externalRecording.length > 0
+        ? externalRecording
+        : undefined;
+
+  // Sentiment / details / model fields are also occasionally sent as booleans
+  // (`false` instead of an absent string). Accept only strings.
+  const stringOrUndefined = (v: unknown): string | undefined =>
+    typeof v === 'string' && v.length > 0 ? v : undefined;
 
   // Transcript is a serialised Python list string in practice; keep raw
   const transcript =
@@ -88,22 +100,22 @@ export const normalizeOmnidimPostCall: PostCallNormalizer = (
     provider: 'OMNIDIM',
     providerCallId: id,
     agentProviderAgentId: agentId,
-    agentName: raw['bot_name'] as string | undefined,
-    toNumber: raw['to_number'] as string | undefined,
-    fromNumber: raw['from_number'] as string | undefined,
-    direction: raw['call_direction'] as string | undefined,
+    agentName: stringOrUndefined(raw['bot_name']),
+    toNumber: stringOrUndefined(raw['to_number']),
+    fromNumber: stringOrUndefined(raw['from_number']),
+    direction: stringOrUndefined(raw['call_direction']),
     durationSeconds,
-    callStatus: raw['call_status'] as string | undefined,
+    callStatus: stringOrUndefined(raw['call_status']),
     recordingUrl,
     transcript,
     summary: undefined, // Omnidim post-call doesn't include summary at top level
-    sentiment: raw['sentiment_score'] as string | undefined,
-    sentimentDetails: raw['sentiment_analysis_details'] as string | undefined,
+    sentiment: stringOrUndefined(raw['sentiment_score']),
+    sentimentDetails: stringOrUndefined(raw['sentiment_analysis_details']),
     extractedVariables,
     cost,
-    modelName: raw['model_name'] as string | undefined,
-    asrService: raw['asr_service'] as string | undefined,
-    ttsService: raw['tts_service'] as string | undefined,
+    modelName: stringOrUndefined(raw['model_name']),
+    asrService: stringOrUndefined(raw['asr_service']),
+    ttsService: stringOrUndefined(raw['tts_service']),
     rawPayload: raw,
   };
 };

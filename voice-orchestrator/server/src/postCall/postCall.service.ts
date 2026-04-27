@@ -98,20 +98,28 @@ export class PostCallService {
     const tenantId = call.tenantId;
 
     // ── Step 2: update Call with post-call data ───────────────────────────────
+    // Defensive coercion: providers occasionally send a bool (e.g. Omnidim
+    // ships `recording_url: false` for no-answer / declined calls). Drop any
+    // non-string value so Prisma doesn't reject the whole update.
+    const str = (v: unknown): string | undefined =>
+      typeof v === 'string' && v.length > 0 ? v : undefined;
+    const num = (v: unknown): number | undefined =>
+      typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+
     const endedAt = call.endedAt ?? new Date();
     await this.prisma.call.update({
       where: { id: call.id },
       data: {
         status: this.mapStatus(data.callStatus),
-        duration: data.durationSeconds ?? undefined,
-        recordingUrl: data.recordingUrl ?? undefined,
-        transcript: data.transcript ?? undefined,
-        summary: data.summary ?? undefined,
-        sentiment: data.sentiment ?? undefined,
+        duration: num(data.durationSeconds) ?? undefined,
+        recordingUrl: str(data.recordingUrl) ?? undefined,
+        transcript: str(data.transcript) ?? undefined,
+        summary: str(data.summary) ?? undefined,
+        sentiment: str(data.sentiment) ?? undefined,
         extractedVariables: data.extractedVariables
           ? (data.extractedVariables as Prisma.InputJsonValue)
           : undefined,
-        cost: data.cost != null ? new Prisma.Decimal(data.cost) : undefined,
+        cost: num(data.cost) != null ? new Prisma.Decimal(data.cost as number) : undefined,
         endedAt,
       },
     });
