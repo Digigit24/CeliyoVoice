@@ -152,12 +152,11 @@ async function dispatchNormalizedEvent(
       const prisma = await getPrismaClient(tenantId);
       await prisma.call.update({ where: { id: callId }, data: { status: CallStatus.FAILED } });
       await publish({ ...base, type: VoiceEventType.ERROR, error: 'Provider error', fatal: true });
-      void forwardToSmartHR({
-        call_id: callId,
-        status: 'failed',
-        ended_at: base.timestamp,
-        error_message: 'Provider error',
-      });
+      // Do NOT forward to SmartHR here. PostCallService.process() already
+      // forwards terminal events with the correct status (`no_answer` / `busy`
+      // / `failed`) derived from the provider's call_status. A second forward
+      // here would overwrite that with a hardcoded `failed`, which is what
+      // SmartHR was seeing for every decline.
       break;
     }
     default:
