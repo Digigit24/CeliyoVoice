@@ -75,18 +75,38 @@ export const normalizeOmnidimPostCall: PostCallNormalizer = (
   const stringOrUndefined = (v: unknown): string | undefined =>
     typeof v === 'string' && v.length > 0 ? v : undefined;
 
-  // Transcript is a serialised Python list string in practice; keep raw
-  const transcript =
-    typeof raw['call_conversation'] === 'string'
-      ? raw['call_conversation']
+  // Pull `call_report` early — production payloads nest most rich fields
+  // (transcript, summary, sentiment, extracted_variables) inside it, while
+  // the older test/sample payload had them flat at top level.
+  const callReport =
+    raw['call_report'] != null &&
+    typeof raw['call_report'] === 'object' &&
+    !Array.isArray(raw['call_report'])
+      ? (raw['call_report'] as Record<string, unknown>)
       : undefined;
 
-  // Extracted variables live in a nested object
+  // Transcript: real payloads put the joined transcript in
+  // call_report.full_conversation. The legacy `call_conversation` path is a
+  // fallback for older sample shapes.
+  const transcript =
+    stringOrUndefined(callReport?.['full_conversation']) ??
+    (typeof raw['call_conversation'] === 'string' ? raw['call_conversation'] : undefined);
+
+  // Summary lives only inside call_report.summary on real payloads.
+  const summary = stringOrUndefined(callReport?.['summary']);
+
+  // Sentiment likewise: prefer call_report.sentiment over the legacy
+  // sentiment_score field.
+  const sentiment =
+    stringOrUndefined(callReport?.['sentiment']) ??
+    stringOrUndefined(raw['sentiment_score']);
+
+  // Extracted variables: prefer call_report.extracted_variables (real
+  // payloads), fall back to the top-level field (test payloads).
+  const evRaw = callReport?.['extracted_variables'] ?? raw['extracted_variables'];
   const extractedVariables =
-    raw['extracted_variables'] != null &&
-    typeof raw['extracted_variables'] === 'object' &&
-    !Array.isArray(raw['extracted_variables'])
-      ? (raw['extracted_variables'] as Record<string, unknown>)
+    evRaw != null && typeof evRaw === 'object' && !Array.isArray(evRaw)
+      ? (evRaw as Record<string, unknown>)
       : undefined;
 
   const cost =
@@ -108,8 +128,8 @@ export const normalizeOmnidimPostCall: PostCallNormalizer = (
     callStatus: stringOrUndefined(raw['call_status']),
     recordingUrl,
     transcript,
-    summary: undefined, // Omnidim post-call doesn't include summary at top level
-    sentiment: stringOrUndefined(raw['sentiment_score']),
+    summary,
+    sentiment,
     sentimentDetails: stringOrUndefined(raw['sentiment_analysis_details']),
     extractedVariables,
     cost,

@@ -386,28 +386,89 @@ function smartHRStatusFromProvider(providerStatus?: string): SmartHRStatus {
 
 /**
  * Pulls a SmartHR-shaped score object out of the normalized post-call data.
- * Omnidim / Bolna do not expose structured scoring today, so we surface
- * whatever has been persisted in extractedVariables.score if present. The
- * shape is intentionally permissive — downstream consumers may ignore it.
+ *
+ * Omnidim's "Extracted Variables" feature is flat key-value, so we configure
+ * the agent with `score_communication`, `score_knowledge`, … and reassemble
+ * them here. Values arrive as strings ("8", "7.5") or as the literal
+ * "Not provided" when the extractor couldn't derive a number — we drop the
+ * latter cleanly. We also accept the legacy nested `score: { ... }` shape
+ * for backward compatibility with hand-crafted test payloads.
  */
 function extractScore(data: NormalizedPostCallData): SmartHRScore | undefined {
-  const raw = data.extractedVariables?.['score'];
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
-  const r = raw as Record<string, unknown>;
+  const ev = data.extractedVariables ?? {};
 
-  const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
-  const strArr = (v: unknown): string[] | undefined =>
-    Array.isArray(v) && v.every((x) => typeof x === 'string') ? (v as string[]) : undefined;
-
-  const score: SmartHRScore = {
-    ...(num(r['communication']) !== undefined ? { communication: num(r['communication']) } : {}),
-    ...(num(r['knowledge']) !== undefined ? { knowledge: num(r['knowledge']) } : {}),
-    ...(num(r['confidence']) !== undefined ? { confidence: num(r['confidence']) } : {}),
-    ...(num(r['relevance']) !== undefined ? { relevance: num(r['relevance']) } : {}),
-    ...(num(r['overall']) !== undefined ? { overall: num(r['overall']) } : {}),
-    ...(strArr(r['strengths']) ? { strengths: strArr(r['strengths']) } : {}),
-    ...(strArr(r['weaknesses']) ? { weaknesses: strArr(r['weaknesses']) } : {}),
+  const num = (v: unknown): number | undefined => {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string') {
+      const s = v.trim();
+      if (!s || /^not[ _-]?provided$/i.test(s) || /^n\/?a$/i.test(s)) return undefined;
+      const parsed = Number(s);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
   };
+
+  // Accept arrays of strings, OR a comma-separated string (Omnidim's
+  // extractor often returns lists as a single comma-joined string).
+  const strList = (v: unknown): string[] | undefined => {
+    if (Array.isArray(v)) {
+      const arr = v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0);
+      return arr.length ? arr : undefined;
+    }
+    if (typeof v === 'string') {
+      const s = v.trim();
+      if (!s || /^not[ _-]?provided$/i.test(s)) return undefined;
+      const parts = s.split(/[,;]\s*/).map((p) => p.trim()).filter(Boolean);
+      return parts.length ? parts : undefined;
+    }
+    return undefined;
+  };
+  const str = (v: unknown): string | undefined => {
+    if (typeof v !== 'string') return undefined;
+    const s = v.trim();
+    if (!s || /^not[ _-]?provided$/i.test(s)) return undefined;
+    return s;
+  };
+
+  // Legacy nested shape: { score: { communication, knowledge, ... } }
+  const nested = ev['score'];
+  const r =
+    nested != null && typeof nested === 'object' && !Array.isArray(nested)
+      ? (nested as Record<string, unknown>)
+      : {};
+
+  // Prefer flat `score_*` keys (Omnidim production), fall back to nested.
+  const pick = (flatKey: string, nestedKey: string): unknown =>
+    ev[flatKey] ?? r[nestedKey];
+
+  const score: SmartHRScore = {};
+  const c = num(pick('score_communication', 'communication'));
+  const k = num(pick('score_knowledge', 'knowledge'));
+  const cf = num(pick('score_confidence', 'confidence'));
+  const rl = num(pick('score_relevance', 'relevance'));
+  const ov = num(pick('score_overall', 'overall'));
+  if (c !== undefined) score.communication = c;
+  if (k !== undefined) score.knowledge = k;
+  if (cf !== undefined) score.confidence = cf;
+  if (rl !== undefined) score.relevance = rl;
+  if (ov !== undefined) score.overall = ov;
+
+  const strengths = strList(pick('score_strengths', 'strengths'));
+  const weaknesses = strList(pick('score_weaknesses', 'weaknesses'));
+  if (strengths) score.strengths = strengths;
+  if (weaknesses) score.weaknesses = weaknesses;
+
+  // Surface recommendation/summary into detailed_feedback so SmartHR can
+  // map them onto its Scorecard.recommendation / Scorecard.summary columns
+  // without us having to extend the typed payload schema.
+  const recommendation = str(ev['score_recommendation']);
+  const scoreSummary = str(ev['score_summary']);
+  if (recommendation || scoreSummary) {
+    score.detailed_feedback = {
+      ...(recommendation ? { recommendation } : {}),
+      ...(scoreSummary ? { summary: scoreSummary } : {}),
+    };
+  }
 
   return Object.keys(score).length > 0 ? score : undefined;
 }
