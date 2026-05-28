@@ -7,6 +7,7 @@ import { normalizeOmnidimPostCall } from '../providers/omnidim/omnidim.postCall'
 import { normalizeBolnaPostCall } from '../providers/bolna/bolna.postCall';
 import type { VoiceProvider } from '@prisma/client';
 import { logger } from '../utils/logger';
+import { forwardToSmartHR, type SmartHRStatus, type SmartHRScore } from '../webhooks/smarthr.forwarder';
 
 // ── Registry of per-provider normalizers ──────────────────────────────────────
 
@@ -97,24 +98,55 @@ export class PostCallService {
     const tenantId = call.tenantId;
 
     // ── Step 2: update Call with post-call data ───────────────────────────────
+    // Defensive coercion: providers occasionally send a bool (e.g. Omnidim
+    // ships `recording_url: false` for no-answer / declined calls). Drop any
+    // non-string value so Prisma doesn't reject the whole update.
+    const str = (v: unknown): string | undefined =>
+      typeof v === 'string' && v.length > 0 ? v : undefined;
+    const num = (v: unknown): number | undefined =>
+      typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+
+    const endedAt = call.endedAt ?? new Date();
     await this.prisma.call.update({
       where: { id: call.id },
       data: {
         status: this.mapStatus(data.callStatus),
-        duration: data.durationSeconds ?? undefined,
-        recordingUrl: data.recordingUrl ?? undefined,
-        transcript: data.transcript ?? undefined,
-        summary: data.summary ?? undefined,
-        sentiment: data.sentiment ?? undefined,
+        duration: num(data.durationSeconds) ?? undefined,
+        recordingUrl: str(data.recordingUrl) ?? undefined,
+        transcript: str(data.transcript) ?? undefined,
+        summary: str(data.summary) ?? undefined,
+        sentiment: str(data.sentiment) ?? undefined,
         extractedVariables: data.extractedVariables
           ? (data.extractedVariables as Prisma.InputJsonValue)
           : undefined,
-        cost: data.cost != null ? new Prisma.Decimal(data.cost) : undefined,
-        endedAt: call.endedAt ?? new Date(),
+        cost: num(data.cost) != null ? new Prisma.Decimal(data.cost as number) : undefined,
+        endedAt,
       },
     });
 
     logger.info({ callId: call.id, sentiment: data.sentiment }, 'Post-call data saved to Call');
+
+    // ── Forward terminal event to SmartHR (call_id = our internal Call.id) ────
+    const score = extractScore(data);
+    const status = smartHRStatusFromProvider(data.callStatus);
+    // Spec: duration=0 when the candidate never picked up (no_answer / busy).
+    const duration =
+      data.durationSeconds ?? (status === 'no_answer' || status === 'busy' ? 0 : undefined);
+
+    void forwardToSmartHR({
+      call_id: call.id,
+      status,
+      ...(duration !== undefined ? { duration } : {}),
+      ...(call.startedAt ? { started_at: call.startedAt.toISOString() } : {}),
+      ended_at: endedAt.toISOString(),
+      ...(data.transcript ? { transcript: data.transcript } : {}),
+      ...(data.recordingUrl ? { recording_url: data.recordingUrl } : {}),
+      ...(data.summary ? { summary: data.summary } : {}),
+      ...(score ? { score } : {}),
+      ...(status !== 'completed' && data.callStatus
+        ? { error_message: data.callStatus }
+        : {}),
+    });
 
     // ── Step 3: find the agent and execute configured actions ─────────────────
     const actions = await this.prisma.postCallAction.findMany({
@@ -339,4 +371,104 @@ export class PostCallService {
     if (s === 'cancelled') return 'CANCELLED';
     return undefined;
   }
+}
+
+// ── SmartHR forwarding helpers ────────────────────────────────────────────────
+
+function smartHRStatusFromProvider(providerStatus?: string): SmartHRStatus {
+  const s = providerStatus?.toLowerCase();
+  if (s === 'completed') return 'completed';
+  if (s === 'busy') return 'busy';
+  if (s === 'no-answer' || s === 'no_answer') return 'no_answer';
+  // Anything else terminal (failed / cancelled / unknown) maps to failed.
+  return 'failed';
+}
+
+/**
+ * Pulls a SmartHR-shaped score object out of the normalized post-call data.
+ *
+ * Omnidim's "Extracted Variables" feature is flat key-value, so we configure
+ * the agent with `score_communication`, `score_knowledge`, … and reassemble
+ * them here. Values arrive as strings ("8", "7.5") or as the literal
+ * "Not provided" when the extractor couldn't derive a number — we drop the
+ * latter cleanly. We also accept the legacy nested `score: { ... }` shape
+ * for backward compatibility with hand-crafted test payloads.
+ */
+function extractScore(data: NormalizedPostCallData): SmartHRScore | undefined {
+  const ev = data.extractedVariables ?? {};
+
+  const num = (v: unknown): number | undefined => {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string') {
+      const s = v.trim();
+      if (!s || /^not[ _-]?provided$/i.test(s) || /^n\/?a$/i.test(s)) return undefined;
+      const parsed = Number(s);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
+  };
+
+  // Accept arrays of strings, OR a comma-separated string (Omnidim's
+  // extractor often returns lists as a single comma-joined string).
+  const strList = (v: unknown): string[] | undefined => {
+    if (Array.isArray(v)) {
+      const arr = v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0);
+      return arr.length ? arr : undefined;
+    }
+    if (typeof v === 'string') {
+      const s = v.trim();
+      if (!s || /^not[ _-]?provided$/i.test(s)) return undefined;
+      const parts = s.split(/[,;]\s*/).map((p) => p.trim()).filter(Boolean);
+      return parts.length ? parts : undefined;
+    }
+    return undefined;
+  };
+  const str = (v: unknown): string | undefined => {
+    if (typeof v !== 'string') return undefined;
+    const s = v.trim();
+    if (!s || /^not[ _-]?provided$/i.test(s)) return undefined;
+    return s;
+  };
+
+  // Legacy nested shape: { score: { communication, knowledge, ... } }
+  const nested = ev['score'];
+  const r =
+    nested != null && typeof nested === 'object' && !Array.isArray(nested)
+      ? (nested as Record<string, unknown>)
+      : {};
+
+  // Prefer flat `score_*` keys (Omnidim production), fall back to nested.
+  const pick = (flatKey: string, nestedKey: string): unknown =>
+    ev[flatKey] ?? r[nestedKey];
+
+  const score: SmartHRScore = {};
+  const c = num(pick('score_communication', 'communication'));
+  const k = num(pick('score_knowledge', 'knowledge'));
+  const cf = num(pick('score_confidence', 'confidence'));
+  const rl = num(pick('score_relevance', 'relevance'));
+  const ov = num(pick('score_overall', 'overall'));
+  if (c !== undefined) score.communication = c;
+  if (k !== undefined) score.knowledge = k;
+  if (cf !== undefined) score.confidence = cf;
+  if (rl !== undefined) score.relevance = rl;
+  if (ov !== undefined) score.overall = ov;
+
+  const strengths = strList(pick('score_strengths', 'strengths'));
+  const weaknesses = strList(pick('score_weaknesses', 'weaknesses'));
+  if (strengths) score.strengths = strengths;
+  if (weaknesses) score.weaknesses = weaknesses;
+
+  // Surface recommendation/summary into detailed_feedback so SmartHR can
+  // map them onto its Scorecard.recommendation / Scorecard.summary columns
+  // without us having to extend the typed payload schema.
+  const recommendation = str(ev['score_recommendation']);
+  const scoreSummary = str(ev['score_summary']);
+  if (recommendation || scoreSummary) {
+    score.detailed_feedback = {
+      ...(recommendation ? { recommendation } : {}),
+      ...(scoreSummary ? { summary: scoreSummary } : {}),
+    };
+  }
+
+  return Object.keys(score).length > 0 ? score : undefined;
 }

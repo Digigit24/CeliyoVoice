@@ -69,6 +69,14 @@ export const config = {
     crmSpecUrl: 'https://crm.celiyo.com/api/schema/?format=json',
   },
 
+  smarthr: {
+    baseUrl: env.SMARTHR_WEBHOOK_BASE_URL.replace(/\/$/, ''),
+    statusPath: env.SMARTHR_WEBHOOK_STATUS_PATH,
+    completedPath: env.SMARTHR_WEBHOOK_COMPLETED_PATH,
+    secret: env.SMARTHR_WEBHOOK_SECRET,
+    timeoutMs: env.SMARTHR_WEBHOOK_TIMEOUT_MS,
+  },
+
   rateLimit: {
     windowMs: 60 * 1000, // 1 minute
     defaultMax: 100,

@@ -28,15 +28,18 @@ export const normalizeOmnidimPostCall: PostCallNormalizer = (
   if (!isPostCallEvent) return null;
 
   // ── Extract fields ────────────────────────────────────────────────────────
-  // The call log `id` is the Omnidim call-log row ID.
-  // `call_request_id.id` is the dispatch request ID — this matches what
-  // Omnidim returns in the dispatch response and what we store as providerCallId.
+  // `call_request_id` is the dispatch request ID — matches what we store as
+  // providerCallId. Omnidim sends it either as a bare integer (post-call
+  // webhook payload) or as a nested { id } object (call-log export shape).
+  const crRaw = raw['call_request_id'];
   const callRequestId =
-    raw['call_request_id'] != null &&
-    typeof raw['call_request_id'] === 'object' &&
-    (raw['call_request_id'] as Record<string, unknown>)['id']
-      ? String((raw['call_request_id'] as Record<string, unknown>)['id'])
-      : undefined;
+    crRaw != null && typeof crRaw !== 'object'
+      ? String(crRaw)
+      : crRaw != null &&
+          typeof crRaw === 'object' &&
+          (crRaw as Record<string, unknown>)['id'] != null
+        ? String((crRaw as Record<string, unknown>)['id'])
+        : undefined;
 
   const id = callRequestId ?? (raw['id'] != null ? String(raw['id']) : undefined);
 
@@ -55,23 +58,55 @@ export const normalizeOmnidimPostCall: PostCallNormalizer = (
         ? raw['duration']
         : undefined;
 
-  // recording_url may be relative — prefer the full internal_recording_url
+  // recording_url may be relative — prefer the full internal_recording_url.
+  // Omnidim sends `false` (boolean) on declined / no-answer calls for both
+  // recording fields, so accept only string values.
+  const internalRecording = raw['internal_recording_url'];
+  const externalRecording = raw['recording_url'];
   const recordingUrl =
-    (raw['internal_recording_url'] as string | undefined) ??
-    (raw['recording_url'] as string | undefined);
+    typeof internalRecording === 'string' && internalRecording.length > 0
+      ? internalRecording
+      : typeof externalRecording === 'string' && externalRecording.length > 0
+        ? externalRecording
+        : undefined;
 
-  // Transcript is a serialised Python list string in practice; keep raw
-  const transcript =
-    typeof raw['call_conversation'] === 'string'
-      ? raw['call_conversation']
+  // Sentiment / details / model fields are also occasionally sent as booleans
+  // (`false` instead of an absent string). Accept only strings.
+  const stringOrUndefined = (v: unknown): string | undefined =>
+    typeof v === 'string' && v.length > 0 ? v : undefined;
+
+  // Pull `call_report` early — production payloads nest most rich fields
+  // (transcript, summary, sentiment, extracted_variables) inside it, while
+  // the older test/sample payload had them flat at top level.
+  const callReport =
+    raw['call_report'] != null &&
+    typeof raw['call_report'] === 'object' &&
+    !Array.isArray(raw['call_report'])
+      ? (raw['call_report'] as Record<string, unknown>)
       : undefined;
 
-  // Extracted variables live in a nested object
+  // Transcript: real payloads put the joined transcript in
+  // call_report.full_conversation. The legacy `call_conversation` path is a
+  // fallback for older sample shapes.
+  const transcript =
+    stringOrUndefined(callReport?.['full_conversation']) ??
+    (typeof raw['call_conversation'] === 'string' ? raw['call_conversation'] : undefined);
+
+  // Summary lives only inside call_report.summary on real payloads.
+  const summary = stringOrUndefined(callReport?.['summary']);
+
+  // Sentiment likewise: prefer call_report.sentiment over the legacy
+  // sentiment_score field.
+  const sentiment =
+    stringOrUndefined(callReport?.['sentiment']) ??
+    stringOrUndefined(raw['sentiment_score']);
+
+  // Extracted variables: prefer call_report.extracted_variables (real
+  // payloads), fall back to the top-level field (test payloads).
+  const evRaw = callReport?.['extracted_variables'] ?? raw['extracted_variables'];
   const extractedVariables =
-    raw['extracted_variables'] != null &&
-    typeof raw['extracted_variables'] === 'object' &&
-    !Array.isArray(raw['extracted_variables'])
-      ? (raw['extracted_variables'] as Record<string, unknown>)
+    evRaw != null && typeof evRaw === 'object' && !Array.isArray(evRaw)
+      ? (evRaw as Record<string, unknown>)
       : undefined;
 
   const cost =
@@ -85,22 +120,22 @@ export const normalizeOmnidimPostCall: PostCallNormalizer = (
     provider: 'OMNIDIM',
     providerCallId: id,
     agentProviderAgentId: agentId,
-    agentName: raw['bot_name'] as string | undefined,
-    toNumber: raw['to_number'] as string | undefined,
-    fromNumber: raw['from_number'] as string | undefined,
-    direction: raw['call_direction'] as string | undefined,
+    agentName: stringOrUndefined(raw['bot_name']),
+    toNumber: stringOrUndefined(raw['to_number']),
+    fromNumber: stringOrUndefined(raw['from_number']),
+    direction: stringOrUndefined(raw['call_direction']),
     durationSeconds,
-    callStatus: raw['call_status'] as string | undefined,
+    callStatus: stringOrUndefined(raw['call_status']),
     recordingUrl,
     transcript,
-    summary: undefined, // Omnidim post-call doesn't include summary at top level
-    sentiment: raw['sentiment_score'] as string | undefined,
-    sentimentDetails: raw['sentiment_analysis_details'] as string | undefined,
+    summary,
+    sentiment,
+    sentimentDetails: stringOrUndefined(raw['sentiment_analysis_details']),
     extractedVariables,
     cost,
-    modelName: raw['model_name'] as string | undefined,
-    asrService: raw['asr_service'] as string | undefined,
-    ttsService: raw['tts_service'] as string | undefined,
+    modelName: stringOrUndefined(raw['model_name']),
+    asrService: stringOrUndefined(raw['asr_service']),
+    ttsService: stringOrUndefined(raw['tts_service']),
     rawPayload: raw,
   };
 };

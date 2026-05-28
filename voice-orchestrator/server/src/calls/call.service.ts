@@ -83,9 +83,10 @@ export class CallService {
         logger.info({ tenantId, callId: call.id, dispatchPayload }, 'Dispatching call to Omnidim');
         const response = await svc.dispatchCall(dispatchPayload);
 
-        // Store provider call ID from response
+        // Store provider call ID from response. Omnidim returns `requestId`
+        // (camelCase) in practice; tolerate legacy `call_id` / `id` shapes too.
         const providerCallId = String(
-          response.call_id ?? response.id ?? '',
+          response.requestId ?? response.call_id ?? response.id ?? '',
         );
 
         await this.prisma.call.update({
