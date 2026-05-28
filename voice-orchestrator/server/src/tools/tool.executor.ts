@@ -1,5 +1,6 @@
 import axios from 'axios';
 import crypto from 'crypto';
+import Ajv from 'ajv';
 import type { PrismaClient, HttpMethod, Tool } from '@prisma/client';
 import { getToolForExecution } from './tool.registry';
 import { getBuiltInFunction } from './functions';
@@ -9,6 +10,9 @@ import { redisClient } from '../db/redis';
 import { createChildLogger } from '../utils/logger';
 
 const log = createChildLogger({ component: 'tool-executor' });
+
+/** Shared Ajv instance — compiles and caches validators across executions */
+const ajv = new Ajv({ allErrors: true, coerceTypes: false });
 
 export interface ExecutionContext {
   tenantId: string;
@@ -68,6 +72,25 @@ export class ToolExecutor {
     const tool = await getToolForExecution(toolId, context.tenantId, this.prisma);
     if (!tool) {
       throw new Error(`Tool ${toolId} not found for tenant ${context.tenantId}`);
+    }
+
+    // ── Pre-request input validation ──────────────────────────────────────────
+    if (tool.inputSchema) {
+      try {
+        const validate = ajv.compile(tool.inputSchema as Record<string, unknown>);
+        if (!validate(inputData)) {
+          const messages = validate.errors
+            ?.map((e) => `${e.instancePath || '(root)'}: ${e.message ?? 'invalid'}`)
+            .join('; ');
+          throw new Error(`Input validation failed: ${messages}`);
+        }
+      } catch (ajvErr) {
+        // Re-throw validation errors; swallow Ajv schema compilation errors (bad schema in DB)
+        if (ajvErr instanceof Error && ajvErr.message.startsWith('Input validation failed')) {
+          throw ajvErr;
+        }
+        log.warn({ toolId, err: ajvErr }, 'Ajv schema compilation error — skipping validation');
+      }
     }
 
     const toolType = (tool as Tool & { toolType?: string }).toolType ?? 'HTTP';

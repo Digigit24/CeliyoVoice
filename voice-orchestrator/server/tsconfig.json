@@ -22,7 +22,10 @@
     "moduleResolution": "node",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@modelcontextprotocol/sdk/server": ["../../node_modules/@modelcontextprotocol/sdk/dist/cjs/server"],
+      "@modelcontextprotocol/sdk/server/sse": ["../../node_modules/@modelcontextprotocol/sdk/dist/cjs/server/sse"],
+      "@modelcontextprotocol/sdk/types": ["../../node_modules/@modelcontextprotocol/sdk/dist/cjs/types"]
     }
   },
   "include": ["src/**/*", "src/types/**/*.d.ts"],

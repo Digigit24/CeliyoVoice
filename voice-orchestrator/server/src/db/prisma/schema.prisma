@@ -293,9 +293,10 @@ model Tool {
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
-  credential ToolCredential? @relation(fields: [credentialId], references: [id], onDelete: SetNull)
-  agentTools AgentTool[]
-  tags       ToolTagAssignment[]
+  credential        ToolCredential?      @relation(fields: [credentialId], references: [id], onDelete: SetNull)
+  agentTools        AgentTool[]
+  tags              ToolTagAssignment[]
+  validationPolicy  ToolValidationPolicy?
 
   @@index([tenantId])
   @@map("tools")
@@ -645,4 +646,59 @@ model ToolExecution {
   @@index([tenantId, agentId, createdAt])
   @@index([tenantId, source, createdAt])
   @@map("tool_executions")
+}
+
+/// Active MCP SSE connection record for live-dashboard monitoring.
+/// Rows are created on connect and deleted on disconnect.
+/// The id matches SSEServerTransport.sessionId (UUID v4).
+model McpSession {
+  id          String   @id
+  tenantId    String   @map("tenant_id")
+  keyId       String   @map("key_id")
+  clientIp    String?  @map("client_ip")
+  userAgent   String?  @map("user_agent")
+  connectedAt DateTime @map("connected_at")
+  lastPingAt  DateTime @map("last_ping_at")
+
+  @@index([tenantId])
+  @@map("mcp_sessions")
+}
+
+/// Registry of outbound MCP servers a tenant wishes to connect to.
+/// Enables voice/chat agents to consume third-party MCP servers
+/// (e.g. Google Drive MCP, GitHub MCP, Postgres MCP).
+model McpServerInstance {
+  id         String   @id @default(uuid())
+  tenantId   String   @map("tenant_id")
+  name       String
+  /// SSE endpoint URL or stdio connection command.
+  url        String
+  /// Auth type for connecting: NONE | BEARER | API_KEY
+  authType   String   @default("NONE") @map("auth_type")
+  /// AES-256-GCM encrypted auth config (token, apiKey, etc.).
+  authConfig Json     @default("{}") @map("auth_config")
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@map("mcp_server_instances")
+}
+
+/// Per-tool input guardrails applied before forwarding payloads to target APIs.
+/// Protects against oversized inputs and prompt-injection patterns.
+model ToolValidationPolicy {
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  toolId          String   @unique @map("tool_id")
+  /// Regex patterns that must NOT appear in the serialized input JSON.
+  blockedPatterns String[] @map("blocked_patterns")
+  /// Maximum allowed character length of the serialized input payload.
+  maxCharacters   Int      @default(500) @map("max_characters")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  tool Tool @relation(fields: [toolId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("tool_validation_policies")
 }

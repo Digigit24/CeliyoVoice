@@ -40,6 +40,9 @@ const envSchema = z.object({
 
   // CORS
   CORS_ALLOWED_ORIGINS: z.string().default('http://localhost:5173,http://localhost:3000'),
+
+  // Celiyo Ecosystem — service-to-service key for admin.celiyo.com system-key generation
+  CELIYO_SYSTEM_KEY: z.string().default(''),
 });
 
 export type Env = z.infer<typeof envSchema>;

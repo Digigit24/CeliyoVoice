@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { success, errorResponse, paginated } from '../utils/apiResponse';
-import { McpServer } from './mcp.server';
+import { resolveToolsForContext } from './mcp.server';
 import type { McpKeyContext } from './mcp.types';
 
 const CreateKeySchema = z.object({
@@ -211,8 +211,7 @@ export const getMcpKeyTools: RequestHandler = async (req, res) => {
     toolIds: Array.isArray(key.toolIds) ? (key.toolIds as string[]) : [],
   };
 
-  const server = new McpServer(req.prisma!);
-  const tools = await server.resolveTools(ctx);
+  const tools = await resolveToolsForContext(ctx, req.prisma!);
 
   return success(res, { tools, toolCount: tools.length });
 };

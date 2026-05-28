@@ -10,6 +10,7 @@ import { conversationRouter } from '../../chat/chat.routes';
 import { authRouter } from '../../auth/auth.routes';
 import { dashboardRouter } from '../../dashboard/dashboard.routes';
 import { devRouter } from './dev.routes';
+import { ecosystemRouter } from '../../ecosystem/ecosystem.routes';
 import { tenantRateLimiter, superAdminRateLimiter } from '../middleware/rateLimiter';
 
 export const apiRouter = Router();
@@ -29,4 +30,5 @@ apiRouter.use('/providers', providerRouter);
 apiRouter.use('/llm', llmRouter);
 apiRouter.use('/mcp', mcpApiRouter);
 apiRouter.use('/conversations', conversationRouter);
+apiRouter.use('/ecosystem', ecosystemRouter);
 apiRouter.use('/dev', devRouter);

@@ -7,6 +7,8 @@ export interface SwaggerConvertOptions {
   prefix?: string;
   includeEndpoints?: string[];
   excludeEndpoints?: string[];
+  /** Fallback base URL used when the spec's servers[] array is empty. */
+  baseUrl?: string;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -126,7 +128,7 @@ export function convertSwaggerToCeliyo(
 ): CeliyoToolFile {
   const info = (spec.info ?? {}) as Record<string, unknown>;
   const servers = (spec.servers ?? []) as Array<{ url?: string }>;
-  const baseUrl = servers[0]?.url ?? '';
+  const baseUrl = servers[0]?.url ?? options?.baseUrl ?? '';
   const paths = (spec.paths ?? {}) as Record<string, Record<string, Record<string, unknown>>>;
   const auth = mapSecurityToAuth(spec);
 
@@ -204,7 +206,7 @@ export function convertSwaggerToCeliyo(
           name,
           description: summary,
           type: 'http',
-          endpoint: path,
+          endpoint: baseUrl ? `${baseUrl}${path}` : path,
           method: method.toUpperCase() as CeliyoToolDef['method'],
           inputSchema: {
             type: 'object',

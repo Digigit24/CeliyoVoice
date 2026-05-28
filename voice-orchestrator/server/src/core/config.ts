@@ -63,6 +63,12 @@ export const config = {
     allowedOrigins: env.CORS_ALLOWED_ORIGINS.split(',').map((o) => o.trim()),
   },
 
+  ecosystem: {
+    systemKey: env.CELIYO_SYSTEM_KEY,
+    adminUrl: env.SUPERADMIN_URL,
+    crmSpecUrl: 'https://crm.celiyo.com/api/schema/?format=json',
+  },
+
   rateLimit: {
     windowMs: 60 * 1000, // 1 minute
     defaultMax: 100,
